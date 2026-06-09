@@ -1,0 +1,6 @@
+build/**
+dist/**
+dist_win/**
+dist_mac/**
+__pycache__/**
+mock_data/**
