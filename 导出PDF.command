@@ -7,7 +7,7 @@ echo "输入 HTML 路径: ./slides.html"
 
 # 定义输出路径
 OUTPUT_DIR="/Users/lhl/Desktop/小猫Mock"
-OUTPUT_PATH="${OUTPUT_DIR}/小猫Mock-技术分享.pdf"
+OUTPUT_PATH="${OUTPUT_DIR}/小猫Mock-单机私有部署的移动端AI调试服务器.pdf"
 
 # 确保目标目录存在
 mkdir -p "${OUTPUT_DIR}"

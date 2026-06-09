@@ -1,4 +1,4 @@
-# iOS App & Mac 🐱「小猫Mock」抓包与 Mock 服务系统
+# 🐱 小猫Mock — 单机私有部署的移动端 AI 调试服务器 (Architecture & Docs)
 
 This system enables real-time HTTP traffic capture, global controls, rule-based mocking, and seamless transparent proxying for the `DramaBox` app using a local Mac 🐱「小猫Mock」抓包服务.
 
