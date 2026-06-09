@@ -1,4 +1,4 @@
-# 🐱 小猫Mock — AI 智能 · 单机私有 · 移动端极速调试服务器
+# 🐱 Little Cat Mock — AI-Driven · Standalone Private · Ultra-fast Mobile Debugging Server
 
 [English](README.md) | [简体中文](README_zh.md)
 
