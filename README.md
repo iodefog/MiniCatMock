@@ -1,4 +1,4 @@
-# 🐱 Little Cat Mock — A Standalone Mobile AI Debugging Server
+# 🐱 小猫Mock — AI 智能 · 单机私有 · 移动端极速调试服务器
 
 [English](README.md) | [简体中文](README_zh.md)
 

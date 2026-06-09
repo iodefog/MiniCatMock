@@ -1,4 +1,4 @@
-# 🐱 小猫Mock — 单机私有部署的移动端 AI 调试服务器
+# 🐱 小猫Mock — AI 智能 · 单机私有 · 移动端极速调试服务器
 
 [English](README.md) | [简体中文](README_zh.md)
 
