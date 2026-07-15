@@ -174,6 +174,29 @@ async def get_index():
         }
     )
 
+@app.get("/en", response_class=HTMLResponse)
+async def get_index_en():
+    base_dir = os.path.join(sys._MEIPASS, "templates") if getattr(sys, 'frozen', False) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+    
+    with open(os.path.join(base_dir, "index_en.html"), "r", encoding="utf-8") as f:
+        html = f.read()
+    with open(os.path.join(base_dir, "style.css"), "r", encoding="utf-8") as f:
+        css = f.read()
+    with open(os.path.join(base_dir, "app.js"), "r", encoding="utf-8") as f:
+        js = f.read()
+        
+    from fastapi import Response
+    content = html.replace("/* {{STYLE_PLACEHOLDER}} */", css).replace("/* {{SCRIPT_PLACEHOLDER}} */", js)
+    return Response(
+        content=content,
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
+
 @app.get("/api/server-info")
 async def get_server_info():
     local_ip = get_local_ip()
@@ -685,12 +708,12 @@ async def handle_mock_request(path: str, request: Request):
     full_url = str(request.url)
     request_start = time.time()  # 记录请求开始时间，用于计算耗时
 
-    # 分离 path 和 query string，构建用于匹配的完整请求标识
-    url_path = f"/{path}"                              # e.g. /video/index/1234/home
-    query_string = str(request.url.query)              # e.g. num=123&name="小李"
-    query_params = dict(request.query_params)          # 结构化 query params
+    # 分离 path 和 query string
+    url_path = f"/{path}"
+    query_string = str(request.url.query)
+    query_params = dict(request.query_params)
 
-    # ─── 智能提取并重组真实的原始目标 URL（不管是否命中 Mock，全部生成并记录） ───
+    # ─── 智能提取并重组真实的原始目标 URL ───
     original_url = request.headers.get("x-original-url")
     real_target_url = original_url
     if original_url:
@@ -718,7 +741,56 @@ async def handle_mock_request(path: str, request: Request):
         except:
             pass
 
-    # 匹配目标串：只用路径，完全忽略 query 参数（时间戳等动态参数不参与匹配）
+    log_entry = {
+        "id": int(request_start * 1000),
+        "time": time.strftime("%H:%M:%S"),
+        "method": method,
+        "url": full_url,
+        "original_url": real_target_url or full_url,  # 真实的原始目标 URL！
+        "path": url_path,
+        "query_params": query_params,
+        "headers": dict(request.headers),
+        "body": None,          # 将在子函数中填充
+        "status": None,        # 请求完成后写入
+        "duration_ms": None,   # 请求完成后写入
+        "loading": True,       # 请求完成前标记为 loading
+        "req_size": 0,         # 将在子函数中填充
+        "resp_size": 0
+    }
+    captured_requests.append(log_entry)
+    if len(captured_requests) > 100: captured_requests.pop(0)
+
+    try:
+        return await _process_mock_request(path, request, log_entry, request_start, real_target_url)
+    except asyncio.CancelledError as ce:
+        log_entry["status"] = 499
+        log_entry["mock_status"] = 499
+        log_entry["mock_response"] = "Client Disconnected / Request Cancelled"
+        log_entry["loading"] = False
+        log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+        raise ce
+    except BaseException as be:
+        log_entry["status"] = 500
+        log_entry["mock_status"] = 500
+        log_entry["mock_response"] = f"Request error: {str(be)}"
+        log_entry["loading"] = False
+        log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+        raise be
+    finally:
+        # 确保 loading 状态被正确重置
+        if log_entry.get("loading", True):
+            log_entry["loading"] = False
+            if log_entry.get("status") is None:
+                log_entry["status"] = 500
+            if log_entry.get("duration_ms") is None:
+                log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+
+async def _process_mock_request(path: str, request: Request, log_entry: dict, request_start: float, real_target_url: str):
+    method = request.method
+    full_url = str(request.url)
+    url_path = f"/{path}"
+    query_string = str(request.url.query)
+    query_params = dict(request.query_params)
     match_target = url_path
 
     body_bytes = await request.body()
@@ -733,7 +805,7 @@ async def handle_mock_request(path: str, request: Request):
         try:
             raw_size = int(raw_size_str)
             import lz4.block
-            # Moya HMBatchReportService 压缩数据不带 4 字节的 header 长度，直接使用 raw_size 作为 uncompressed_size
+            # Moya HMBatchReportService 压缩数据不带 4 字节 header 长度，直接使用 raw_size 作为 uncompressed_size
             decompressed = lz4.block.decompress(body_bytes, uncompressed_size=raw_size)
             body_str = decompressed.decode("utf-8", errors="ignore")
         except ImportError:
@@ -756,24 +828,9 @@ async def handle_mock_request(path: str, request: Request):
     req_headers_size = sum(len(k.encode('utf-8')) + len(v.encode('utf-8')) + 4 for k, v in request.headers.items()) + len(method) + len(full_url) + 12
     req_size = req_headers_size + len(body_bytes)
 
-    log_entry = {
-        "id": int(request_start * 1000),
-        "time": time.strftime("%H:%M:%S"),
-        "method": method,
-        "url": full_url,
-        "original_url": real_target_url or full_url,  # 真实的原始目标 URL！
-        "path": url_path,
-        "query_params": query_params,
-        "headers": dict(request.headers),
-        "body": body_json,
-        "status": None,        # 请求完成后写入
-        "duration_ms": None,   # 请求完成后写入
-        "loading": True,       # 请求完成前标记为 loading
-        "req_size": req_size,
-        "resp_size": 0
-    }
-    captured_requests.append(log_entry)
-    if len(captured_requests) > 100: captured_requests.pop(0)
+    # 填充 log_entry
+    log_entry["body"] = body_json
+    log_entry["req_size"] = req_size
 
     # ─── 智能匹配引擎 ───────────────────────────────────────────
     # 规则：收集所有方法匹配的规则，优先命中配置了“Matching Params”的规则，匹配参数越多优先级越高
@@ -787,7 +844,7 @@ async def handle_mock_request(path: str, request: Request):
             for file in files:
                 if not file.endswith(".json"):
                     continue
-                if file in ["ai_config.json", "telemetry_config.json"]:
+                if file in ["ai_config.json", "telemetry_config.json", "localtunnel_config.json"]:
                     continue
                 try:
                     with open(os.path.join(root, file), "r", encoding="utf-8") as f:
@@ -842,7 +899,7 @@ async def handle_mock_request(path: str, request: Request):
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
 
-        # 将命中结果写回日志条目（dict 是引用，直接修改即可）
+        # 将命中结果写回日志条目
         log_entry["mock_matched"] = True
         log_entry["mock_rule_name"] = matched_rule.get("name", "")
         log_entry["mock_rule_folder"] = matched_rule.get("folder", "")
@@ -870,23 +927,18 @@ async def handle_mock_request(path: str, request: Request):
 
             async def event_generator():
                 body = matched_rule.get("response_body", "")
-                # 统一换行符
                 normalized_body = body.replace("\r\n", "\n")
                 
-                # 智能流式传输：如果是标准的 SSE 格式（包含 \n\n 分隔符）
                 if "\n\n" in normalized_body:
                     blocks = normalized_body.split("\n\n")
                     for i, block in enumerate(blocks):
                         block_stripped = block.strip()
                         if not block_stripped:
                             continue
-                        # SSE 标准：每个 event 块需以 \n\n 结尾才能让客户端 parser 触发解析回调
                         yield f"{block_stripped}\n\n"
-                        # 模拟流式传输的间隔
                         if i < len(blocks) - 1:
                             await asyncio.sleep(0.1)
                 else:
-                    # 普通流式传输：按行发送，并保留所有空白行
                     lines = normalized_body.split("\n")
                     for i, line in enumerate(lines):
                         yield f"{line}\n"
@@ -907,16 +959,12 @@ async def handle_mock_request(path: str, request: Request):
     original_url = request.headers.get("x-original-url")
     if original_url:
         try:
-            # 自动补全协议 Scheme 以防客户端上传的 URL 缺少协议头导致 urlparse 解析错误
             if not original_url.startswith("http://") and not original_url.startswith("https://"):
                 if "devdrama" in original_url:
                     original_url = "http://" + original_url
                 else:
                     original_url = "https://" + original_url
 
-            # ── 关键修复：Moya 可能在 Endpoint 构建后追加 query 参数，也可能已包含 query。
-            # 我们通过 urllib.parse 对 original_url 与 query_string 的参数进行深度解析与去重合并，
-            # 彻底杜绝 HTTP 参数污染（HPP / 重复拼接 timestamps 参数）导致的 403 / 签名失效报错。
             from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
             parsed_url = urlparse(original_url)
             original_params = parse_qsl(parsed_url.query)
@@ -930,7 +978,6 @@ async def handle_mock_request(path: str, request: Request):
                 
             new_query = urlencode(list(merged_params.items()))
             
-            # 自动升级 http 为 https，只要是 dramabox 相关的线上正式域名，避免 CDN (Akamai) 拦截 403 / Access Denied 报错
             scheme = parsed_url.scheme
             if "dramabox" in parsed_url.netloc:
                 scheme = "https"
@@ -945,40 +992,23 @@ async def handle_mock_request(path: str, request: Request):
             ))
 
             print(f"\n✨ [MockServer Proxy] 转发请求: {method} {real_url}")
-            log_entry["proxy_real_url"] = real_url   # 记录到日志方便调试
+            log_entry["proxy_real_url"] = real_url
 
-            # ── 代理头处理：原样转发 App 所有原始请求头 ──
-            # 
-            # 分析 iOS 源码 DRBNetworkHelper.prepareRequsetHeader() 发现，App 发送约 40 个自定义业务头：
-            # tn (token), sn (签名), cid, device-id, idfv, idfa, language, local-time,
-            # p, pline, package-name, time-zone, eighteen-bans, current-language, ov, mf, mcc,
-            # brand, srn, ins, locale, vn, lat, adid, md, tz, mchid, mbid, build, afid,
-            # instanceId, storeCountryCode, apn, over-flow, active-time, is_vpn, is_root, is_emulator
-            # 
-            # 这些头是后端 API 签名校验和业务逻辑必需的，缺少任何一个都会导致请求失败。
-            # 因此必须原样转发，只排除代理层添加的内部标记头。
-            #
-            # 注意：不使用 curl_cffi 的 impersonate（TLS 伪装）！
-            # 原因：impersonate 会生成 Safari 的 User-Agent 和 TLS 指纹，
-            # 但 App 的请求头（如 pline=IOS, brand=apple）明显不是浏览器发出的。
-            # 不 Mock 时 App 直连后端是正常的，说明后端 API 接受 App 的原始请求。
-            # 使用 proxy="" 禁用系统代理（Clash/V2Ray），使用 curl_cffi 直连即可。
             proxy_headers = {}
             excluded_headers = {
-                "host",             # 由 HTTP 客户端根据目标 URL 自动设置
-                "x-original-url",   # MockServer 内部路由标记
-                "x-original-host",  # MockServer 内部路由标记
-                "content-length",   # 由 HTTP 客户端自动计算
+                "host",
+                "x-original-url",
+                "x-original-host",
+                "content-length",
                 "x-forwarded-proto", "x-forwarded-for", "x-forwarded-port",
                 "x-forwarded-host", "x-real-ip", "x-scheme",
                 "connection", "keep-alive",
-                "x-encrypt-type",   # LZ4 内部标记
+                "x-encrypt-type",
             }
             for k, v in request.headers.items():
                 if k.lower() not in excluded_headers:
                     proxy_headers[k] = v
             
-            # 调试日志：显示实际转发给上游的请求头
             forwarded_keys = list(proxy_headers.keys())
             print(f"   📋 [Proxy Headers] 共 {len(forwarded_keys)} 个头: {', '.join(forwarded_keys[:15])}{'...' if len(forwarded_keys) > 15 else ''}")
             
@@ -991,7 +1021,6 @@ async def handle_mock_request(path: str, request: Request):
                 async def stream_proxy():
                     accumulated = []
                     try:
-                        # 流式请求：使用 curl_cffi 直连（不 impersonate），原样转发 App 请求头
                         try:
                             from curl_cffi.requests import AsyncSession
                             async with AsyncSession(verify=False, proxy="") as client:
@@ -1017,7 +1046,6 @@ async def handle_mock_request(path: str, request: Request):
                                         yield chunk
                         except Exception as stream_tls_err:
                             print(f"[Stream Proxy] curl_cffi 失败，降级 httpx: {str(stream_tls_err)}")
-                            # 降级到 httpx
                             async with httpx.AsyncClient(verify=False, trust_env=False) as client:
                                 async with client.stream(
                                     method=method,
@@ -1053,16 +1081,12 @@ async def handle_mock_request(path: str, request: Request):
                         log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
                         log_entry["loading"] = False
 
-                # Headers for streaming
                 stream_headers = {
                     "Cache-Control": "no-cache",
                     "X-Accel-Buffering": "no",
                 }
                 return StreamingResponse(stream_proxy(), media_type="text/event-stream", headers=stream_headers)
             else:
-                # ── 普通非流式请求 ──
-                # 使用 curl_cffi 直连（不 impersonate），原样转发 App 所有请求头
-                # proxy="" 禁用系统代理（Clash/V2Ray），避免连接 127.0.0.1:7890 失败
                 resp = None
                 try:
                     from curl_cffi.requests import AsyncSession
@@ -1107,19 +1131,24 @@ async def handle_mock_request(path: str, request: Request):
         except Exception as e:
             import traceback
             err_detail = traceback.format_exc()
+            err_str = str(e).lower()
+            status_code = 504 if ("timeout" in err_str or "timed out" in err_str) else 502
             log_entry["mock_response"] = f"Proxy error: {str(e)}"
-            log_entry["mock_status"] = 502
-            log_entry["status"] = 502
+            log_entry["mock_status"] = status_code
+            log_entry["status"] = status_code
             log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
             log_entry["loading"] = False
             print(f"[MockServer PROXY ERROR] real_url={log_entry.get('proxy_real_url', original_url)}\n{err_detail}")
             return Response(
                 content=json.dumps({"error": "MockServer Proxy Error", "details": str(e)}),
-                status_code=502,
+                status_code=status_code,
                 media_type="application/json"
             )
 
     log_entry["mock_response"] = None
+    log_entry["status"] = 200
+    log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+    log_entry["loading"] = False
     return {
         "message": "Default Mock Response — 未命中任何规则",
         "tips": "在左侧日志点击此请求，可一键填入规则并保存",

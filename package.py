@@ -35,6 +35,72 @@ def package():
         print("📦 Installing PyInstaller dependency...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller", "--break-system-packages"])
 
+    # 1.5 预检 Node.js / npx 环境以支持跨网联通功能
+    print("⚡ Checking Node.js / npx availability for localtunnel...")
+    npx_cmd = None
+    if shutil.which("npx"):
+        npx_cmd = "npx"
+    else:
+        # 探测常见路径以给出准确警告
+        if os.name == "nt":
+            program_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+            program_files_x86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+            app_data = os.environ.get("APPDATA", "")
+            user_profile = os.environ.get("USERPROFILE", "")
+            
+            fallback_paths = [
+                os.path.join(program_files, "nodejs", "npx.cmd"),
+                os.path.join(program_files_x86, "nodejs", "npx.cmd"),
+            ]
+            if app_data:
+                fallback_paths.append(os.path.join(app_data, "npm", "npx.cmd"))
+            if user_profile:
+                nvm_home = os.environ.get("NVM_HOME", os.path.join(user_profile, "AppData", "Roaming", "nvm"))
+                if os.path.exists(nvm_home):
+                    try:
+                        for v in os.listdir(nvm_home):
+                            npx_path = os.path.join(nvm_home, v, "npx.cmd")
+                            if os.path.exists(npx_path):
+                                fallback_paths.append(npx_path)
+                    except Exception:
+                        pass
+            for path in fallback_paths:
+                if os.path.exists(path):
+                    npx_cmd = path
+                    break
+        else:
+            home = os.path.expanduser("~")
+            common_nvm_bin = os.path.join(home, ".nvm/versions/node")
+            if os.path.exists(common_nvm_bin):
+                try:
+                    versions = os.listdir(common_nvm_bin)
+                    for v in versions:
+                        npx_path = os.path.join(common_nvm_bin, v, "bin", "npx")
+                        if os.path.exists(npx_path):
+                            npx_cmd = npx_path
+                            break
+                except Exception:
+                    pass
+            if not npx_cmd:
+                fallback_paths = [
+                    "/opt/homebrew/bin/npx",
+                    "/usr/local/bin/npx",
+                    "/usr/bin/npx",
+                    os.path.join(home, ".local/bin/npx")
+                ]
+                for path in fallback_paths:
+                    if os.path.exists(path):
+                        npx_cmd = path
+                        break
+    if npx_cmd:
+        print(f"✅ Node.js / npx verified at: {npx_cmd}")
+    else:
+        print("="*60)
+        print("⚠️  [警告] 未在当前打包机检测到 Node.js / npx 环境！")
+        print("   跨网联通（Localtunnel）功能在运行时将依赖 Node.js/npx 工具链，")
+        print("   如果目标运行机器没有安装 Node.js/npx，该功能将无法开启。")
+        print("="*60)
+
     # 2. 确保安装了运行所需的一切依赖
     dependencies = ["fastapi", "uvicorn", "pydantic", "httpx", "lz4", "curl_cffi"]
     for dep in dependencies:
