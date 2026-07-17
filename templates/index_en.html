@@ -114,7 +114,7 @@
                         </label>
                         <span>URL</span>
                     </div>
-                    <button class="btn-refresh" onclick="clearLogs()" title="Clear All" data-i18n-title="clear_logs_title" style="color: var(--red); background: var(--red-light); border-color: rgba(239, 68, 68, 0.1);">🗑️ <span>Clear</span></button>
+                    <button type="button" class="btn-refresh" onclick="clearLogs(event)" title="Clear All" data-i18n-title="clear_logs_title" style="color: var(--red); background: var(--red-light); border-color: rgba(239, 68, 68, 0.1);">🗑️ <span>Clear</span></button>
                 </div>
             </div>
 
@@ -288,7 +288,7 @@
                         <div class="terminal-header">
                             <div class="terminal-title">🖥️ Kitty Mock Real-time Traffic Console</div>
                             <div class="terminal-actions">
-                                <button class="btn-terminal-clear" onclick="clearLogs()" style="padding: 4px 10px; font-size: 11px;" data-i18n="btn_clear_captured">🗑️ Clear Captured</button>
+                                <button type="button" class="btn-terminal-clear" onclick="clearLogs(event)" style="padding: 4px 10px; font-size: 11px;" data-i18n="btn_clear_captured">🗑️ Clear Captured</button>
                                 <span class="pulse-indicator">● LIVE</span>
                             </div>
                         </div>
@@ -392,7 +392,9 @@
                                     style="display: flex; justify-content: space-between; align-items: center;">
                                     <span class="section-label">RESPONSE BODY</span>
                                 </div>
-                                <pre class="code-box-large" id="inspect-response">{}</pre>
+                                <div class="response-body-wrapper" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
+                                    <pre class="code-box-large" id="inspect-response" style="flex: 1; min-height: 0; max-height: none; overflow: auto;">{}</pre>
+                                </div>
                             </div>
 
                             <!-- Composer Subtab (cURL Generator & Sender) -->
@@ -1284,6 +1286,42 @@
                 updateToggleServiceButtonStyle(checkbox.checked);
             }
         }, 1000);
+
+        // ─── Response Body scroll-to-top button ───
+        document.addEventListener('DOMContentLoaded', function () {
+            var btn = document.getElementById('resp-scroll-top-btn');
+            if (!btn) return;
+
+            function updateBtn() {
+                var pre = document.getElementById('inspect-response');
+                var topHalf = document.querySelector('.details-top-half');
+                var wrapper = document.querySelector('.response-body-wrapper');
+                var show = false;
+                if (pre && pre.scrollTop > 200) {
+                    show = true;
+                } else if (topHalf && wrapper) {
+                    var delta = wrapper.getBoundingClientRect().top - topHalf.getBoundingClientRect().top;
+                    if (delta < -200) show = true;
+                }
+                btn.classList.toggle('visible', show);
+            }
+
+            btn.addEventListener('click', function () {
+                var pre = document.getElementById('inspect-response');
+                if (pre) pre.scrollTo({ top: 0, behavior: 'smooth' });
+                var topHalf = document.querySelector('.details-top-half');
+                if (topHalf) topHalf.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            var pre = document.getElementById('inspect-response');
+            if (pre) pre.addEventListener('scroll', updateBtn);
+            var topHalf = document.querySelector('.details-top-half');
+            if (topHalf) topHalf.addEventListener('scroll', updateBtn);
+            if (pre) {
+                new MutationObserver(updateBtn).observe(pre, { childList: true, subtree: true, characterData: true });
+            }
+            updateBtn();
+        });
     </script>
 
     <!-- ─── Core Application Logic Injection ─── -->
@@ -1373,6 +1411,7 @@
         🐱
         <span class="badge" id="ai-pet-collapsed-level">Lv.1</span>
     </div>
+<button class="scroll-top-btn" id="resp-scroll-top-btn" title="回到顶部">↑</button>
 </body>
 
 </html>

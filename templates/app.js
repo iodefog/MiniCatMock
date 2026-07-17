@@ -803,7 +803,7 @@ function renderFilteredLogs() {
         if (filterType === 'POST' && log.method !== 'POST') return false;
         if (filterType === 'mocked' && !log.mock_matched) return false;
         if (filterType === 'missed' && log.mock_matched) return false;
-        if (filterType === 'error' && !(log.status >= 400 || (log.status === 0 && !log.loading) || log.error)) return false;
+        if (filterType === 'error' && !(log.status >= 400 || (log.status === 0 && !log.loading) || log.error || log.business_error)) return false;
 
         // 1.5 过滤根路径日志 (开启过滤日志时，隐藏 path 仅为 "/" 的请求)
         if (window.filterLogsEnabled && log.path === '/') return false;
@@ -853,8 +853,12 @@ function renderFilteredLogs() {
         if (log.loading) {
             statusBadge = `<span class="status-badge loading">⏳ 请求中</span>`;
         } else if (log.status) {
-            const cls = log.status >= 400 ? 'err' : 'ok';
-            statusBadge = `<span class="status-badge ${cls}">${log.status}</span>`;
+            // 业务层错误（HTTP 200 但响应体携带失败的业务状态码，如 status:100）也标红
+            const isErr = log.status >= 400 || log.business_error;
+            const cls = isErr ? 'err' : 'ok';
+            const shownStatus = (log.business_error && log.business_status != null) ? log.business_status : log.status;
+            const bizTitle = log.business_error ? ' title="业务层错误（响应体 status 非成功）"' : '';
+            statusBadge = `<span class="status-badge ${cls}"${bizTitle}>${shownStatus}${log.business_error ? ' ⚠' : ''}</span>`;
         }
 
         // 耗时 badge
@@ -896,8 +900,19 @@ function renderFilteredLogs() {
 }
 
 // ─── 清空请求 ───
-async function clearLogs() {
-    if (!confirm('确定要清空所有实时请求列表吗？')) return;
+let clearingLogs = false;
+async function clearLogs(e) {
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    // 防止重复点击导致弹窗二次出现
+    if (clearingLogs) return;
+    clearingLogs = true;
+    if (!confirm('确定要清空所有实时请求列表吗？')) {
+        clearingLogs = false;
+        return;
+    }
     try {
         const res = await fetch('/api/logs', { method: 'DELETE' });
         if (res.ok) {
@@ -910,6 +925,7 @@ async function clearLogs() {
     } catch (e) {
         showToast('❌ 清空失败', '#ef4444');
     }
+    clearingLogs = false;
 }
 
 // ─── Collapsible JSON Viewer Helper ───
@@ -1707,11 +1723,21 @@ function selectLog(element, logId) {
 
     if (log.mock_matched) {
         respStatusBadge.className = 'mock-badge';
-        respStatusBadge.innerText = `🟢 Mock 命中 (规则: ${log.mock_rule_name || '未命名'})`;
+        let mockLabel = `🟢 Mock 命中 (规则: ${log.mock_rule_name || '未命名'})`;
+        if (log.business_error) {
+            mockLabel += ` ⚠ 业务错误 ${log.business_status != null ? log.business_status : ''}`;
+            respStatusBadge.classList.add('mock-badge-err');
+        }
+        respStatusBadge.innerText = mockLabel;
         tryRenderJsonView('inspect-response', log.mock_response || '{}');
     } else {
         respStatusBadge.className = 'mock-badge missed';
-        respStatusBadge.innerText = `⚪ 真实透传响应 (${log.mock_status || 200})`;
+        let proxyLabel = `⚪ 真实透传响应 (${log.mock_status || 200})`;
+        if (log.business_error) {
+            proxyLabel += ` ⚠ 业务错误 ${log.business_status != null ? log.business_status : ''}`;
+            respStatusBadge.classList.add('mock-badge-err');
+        }
+        respStatusBadge.innerText = proxyLabel;
 
         if (log.mock_response) {
             tryRenderJsonView('inspect-response', log.mock_response);
@@ -3727,3 +3753,5 @@ function showRandomFunFact() {
     
     showBubbleText(prefix + item);
 }
+
+

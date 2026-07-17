@@ -47,6 +47,9 @@ else:
 DATA_DIR = os.path.join(BASE_DIR, "mock_data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+CAPTURED_DATA_PATH = os.path.join(DATA_DIR, "captured_requests.json")
+MAX_CAPTURED_REQUESTS = 500  # 增大内存中抓包记录上限
+
 TELEMETRY_CONFIG_PATH = os.path.join(DATA_DIR, "telemetry_config.json")
 def get_or_create_device_id() -> str:
     if os.path.exists(TELEMETRY_CONFIG_PATH):
@@ -71,6 +74,84 @@ session_packets_count = 0  # 记录本次运行抓到的总包数(仅命中的mo
 session_total_requests = 0 # 记录本次运行产生的所有代理请求数
 
 captured_requests = []
+_last_save_time = 0
+
+def load_captured_requests():
+    """从磁盘恢复历史抓包数据，确保服务器重启后数据不丢失"""
+    global captured_requests
+    if os.path.exists(CAPTURED_DATA_PATH):
+        try:
+            with open(CAPTURED_DATA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    # 恢复请求列表，但将所有 loading 状态重置为 False
+                    for entry in data:
+                        entry["loading"] = False
+                        # 兼容旧数据可能缺少的字段
+                        if "req_size" not in entry:
+                            entry["req_size"] = 0
+                        if "resp_size" not in entry:
+                            entry["resp_size"] = 0
+                    captured_requests = data
+                    print(f"📦 已从磁盘恢复 {len(captured_requests)} 条历史抓包记录")
+        except Exception as e:
+            print(f"⚠️ 恢复历史抓包记录失败: {e}")
+            captured_requests = []
+
+def save_captured_requests():
+    """将抓包数据写入磁盘进行持久化（同步写入，足够快）"""
+    global _last_save_time
+    now = time.time()
+    # 防抖：1 秒内最多保存一次，避免高并发时频繁 IO
+    if now - _last_save_time < 1.0:
+        return
+    _last_save_time = now
+    try:
+        # 只保存已完成（非 loading）的记录，并限制数量
+        to_save = [r for r in captured_requests if not r.get("loading", False)]
+        if len(to_save) > MAX_CAPTURED_REQUESTS:
+            to_save = to_save[-MAX_CAPTURED_REQUESTS:]
+        with open(CAPTURED_DATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(to_save, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 保存抓包记录失败: {e}")
+
+
+def detect_business_error(mock_response):
+    """从响应体中识别业务层错误（例如 {"status":100,"message":"服务器内部错误"}）。
+
+    这类异常的真实 HTTP 状态码通常是 200（代理透传成功），但响应体里的业务状态码
+    表示失败。为了让前端能在列表中把它当作错误高亮、并出现在「错误」过滤器中，这里
+    做业务层错误识别。返回 (is_error, business_status)。
+    """
+    if not mock_response or not isinstance(mock_response, str):
+        return False, None
+    try:
+        data = json.loads(mock_response)
+    except Exception:
+        return False, None
+    if not isinstance(data, dict):
+        return False, None
+    # 显式的 error 字段（非空字符串 / 布尔真值）
+    err = data.get("error")
+    if err and str(err).strip().lower() not in ("0", "false", "null", "none", "{}", "[]", ""):
+        biz_status = data.get("status") if isinstance(data.get("status"), (int, float)) else None
+        return True, biz_status
+    # 顶层数字 status / code 字段：0 与 2xx/3xx 视为成功或重定向，其余视为业务错误
+    for key in ("status", "code"):
+        val = data.get(key)
+        if isinstance(val, (int, float)):
+            v = int(val)
+            if v == 0 or (200 <= v < 400):
+                return False, v
+            if v < 200 or v >= 400:
+                return True, v
+    return False, None
+
+
+# 启动时恢复历史数据
+load_captured_requests()
+
 mock_global_enabled = True
 
 class ConfigPayload(BaseModel):
@@ -317,6 +398,12 @@ async def get_logs():
 @app.delete("/api/logs")
 async def clear_logs():
     captured_requests.clear()
+    # 同时清除磁盘持久化文件
+    try:
+        if os.path.exists(CAPTURED_DATA_PATH):
+            os.remove(CAPTURED_DATA_PATH)
+    except Exception:
+        pass
     return {"status": "cleared"}
 
 @app.post("/api/replay-request")
@@ -758,7 +845,7 @@ async def handle_mock_request(path: str, request: Request):
         "resp_size": 0
     }
     captured_requests.append(log_entry)
-    if len(captured_requests) > 100: captured_requests.pop(0)
+    if len(captured_requests) > MAX_CAPTURED_REQUESTS: captured_requests.pop(0)
 
     try:
         return await _process_mock_request(path, request, log_entry, request_start, real_target_url)
@@ -768,6 +855,7 @@ async def handle_mock_request(path: str, request: Request):
         log_entry["mock_response"] = "Client Disconnected / Request Cancelled"
         log_entry["loading"] = False
         log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+        save_captured_requests()
         raise ce
     except BaseException as be:
         log_entry["status"] = 500
@@ -775,15 +863,34 @@ async def handle_mock_request(path: str, request: Request):
         log_entry["mock_response"] = f"Request error: {str(be)}"
         log_entry["loading"] = False
         log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+        save_captured_requests()
         raise be
     finally:
-        # 确保 loading 状态被正确重置
+        # 确保 loading 状态被正确重置，并补全所有关键字段（防止前端渲染异常）
         if log_entry.get("loading", True):
             log_entry["loading"] = False
             if log_entry.get("status") is None:
                 log_entry["status"] = 500
             if log_entry.get("duration_ms") is None:
                 log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+        # 兜底补全前端渲染必需字段，避免因字段缺失导致前端列表跳过或渲染异常
+        log_entry.setdefault("mock_matched", False)
+        log_entry.setdefault("mock_response", None)
+        log_entry.setdefault("mock_status", log_entry.get("status", 0))
+        log_entry.setdefault("resp_size", 0)
+        log_entry.setdefault("req_size", 0)
+        log_entry.setdefault("response_headers", {})
+        # 业务层错误识别：HTTP 200 但响应体里携带着失败的业务状态码（如 status:100）
+        _is_biz_err, _biz_status = detect_business_error(log_entry.get("mock_response"))
+        if _is_biz_err:
+            log_entry["business_error"] = True
+            if _biz_status is not None:
+                log_entry["business_status"] = _biz_status
+            log_entry.setdefault("error", True)
+        else:
+            log_entry.setdefault("business_error", False)
+        # 请求完成后持久化到磁盘
+        save_captured_requests()
 
 async def _process_mock_request(path: str, request: Request, log_entry: dict, request_start: float, real_target_url: str):
     method = request.method
@@ -1080,6 +1187,15 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                     finally:
                         log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
                         log_entry["loading"] = False
+                        # 业务层错误识别（流式响应同样适用）
+                        _is_biz_err, _biz_status = detect_business_error(log_entry.get("mock_response"))
+                        if _is_biz_err:
+                            log_entry["business_error"] = True
+                            if _biz_status is not None:
+                                log_entry["business_status"] = _biz_status
+                            log_entry.setdefault("error", True)
+                        else:
+                            log_entry.setdefault("business_error", False)
 
                 stream_headers = {
                     "Cache-Control": "no-cache",
@@ -1087,6 +1203,7 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                 }
                 return StreamingResponse(stream_proxy(), media_type="text/event-stream", headers=stream_headers)
             else:
+                # ─── 非 Stream 代理请求 ───────────────────────
                 resp = None
                 try:
                     from curl_cffi.requests import AsyncSession
@@ -1100,35 +1217,72 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                         )
                 except Exception as tls_err:
                     print(f"[Proxy] curl_cffi 请求失败，降级到 httpx: {str(tls_err)}")
-                    async with httpx.AsyncClient(verify=False, trust_env=False) as client:
-                        resp = await client.request(
-                            method=method,
-                            url=real_url,
-                            headers=proxy_headers,
-                            content=body_bytes,
-                            timeout=60.0
-                        )
+                    try:
+                        async with httpx.AsyncClient(verify=False, trust_env=False) as client:
+                            resp = await client.request(
+                                method=method,
+                                url=real_url,
+                                headers=proxy_headers,
+                                content=body_bytes,
+                                timeout=60.0
+                            )
+                    except Exception as httpx_err:
+                        raise Exception(f"curl_cffi 和 httpx 均请求失败: {str(httpx_err)}") from httpx_err
                 
-                log_entry["mock_response"] = resp.text
-                log_entry["mock_status"] = resp.status_code
+                # ─── 安全提取响应数据（每一步独立 try/except，确保 log_entry 不会半途而废）───
+                if resp is None:
+                    raise Exception("Proxy response is None - both curl_cffi and httpx returned no response")
                 
+                resp_status = 502
+                resp_text = ""
+                resp_content = b""
                 resp_headers = {}
-                for k, v in resp.headers.items():
-                    if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
-                        resp_headers[k] = v
                 
+                try:
+                    resp_status = resp.status_code
+                except Exception as e:
+                    print(f"[Proxy WARN] 无法读取 status_code: {e}")
+                
+                try:
+                    resp_text = resp.text if resp.text else ""
+                except Exception as e:
+                    print(f"[Proxy WARN] 无法读取 response text: {e}")
+                    resp_text = f"[Response body decode failed: {str(e)}]"
+                
+                try:
+                    resp_content = resp.content if resp.content else b""
+                except Exception as e:
+                    print(f"[Proxy WARN] 无法读取 response content: {e}")
+                    resp_content = resp_text.encode("utf-8", errors="ignore") if resp_text else b""
+                
+                try:
+                    for k, v in (resp.headers.items() if hasattr(resp, 'headers') and resp.headers else []):
+                        if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
+                            resp_headers[k] = v
+                except Exception as e:
+                    print(f"[Proxy WARN] 无法读取 response headers: {e}")
+                
+                # ─── 填充 log_entry（所有关键字段必须在此写入）───
+                log_entry["mock_response"] = resp_text
+                log_entry["mock_status"] = resp_status
                 log_entry["response_headers"] = resp_headers
-                log_entry["status"] = resp.status_code
+                log_entry["status"] = resp_status
                 log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
                 log_entry["loading"] = False
-                log_entry["resp_size"] = len(resp.content) + sum(len(k.encode('utf-8')) + len(v.encode('utf-8')) + 4 for k, v in resp.headers.items()) + 15
+                log_entry["resp_size"] = (
+                    len(resp_content) +
+                    sum(len(str(k).encode('utf-8')) + len(str(v).encode('utf-8')) + 4 for k, v in resp_headers.items()) +
+                    15
+                )
+                
+                print(f"✅ [Proxy OK] {method} {real_url} → {resp_status} ({log_entry['duration_ms']}ms)")  # 诊断日志
                 
                 return Response(
-                    content=resp.content,
-                    status_code=resp.status_code,
+                    content=resp_content if resp_content else resp_text,
+                    status_code=resp_status,
                     headers=resp_headers
                 )
-        except Exception as e:
+        except BaseException as e:
             import traceback
             err_detail = traceback.format_exc()
             err_str = str(e).lower()
@@ -1138,6 +1292,7 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
             log_entry["status"] = status_code
             log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
             log_entry["loading"] = False
+            log_entry.setdefault("resp_size", 0)
             print(f"[MockServer PROXY ERROR] real_url={log_entry.get('proxy_real_url', original_url)}\n{err_detail}")
             return Response(
                 content=json.dumps({"error": "MockServer Proxy Error", "details": str(e)}),
