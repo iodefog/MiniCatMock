@@ -1,0 +1,83 @@
+            <!-- ─── Drawer: AI Assistant ─── -->
+            <div id="ai-panel" class="mock-drawer ai-drawer">
+                <div class="drawer-header" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white;">
+                    <h3 style="color: white; margin: 0; font-size: 16px;">✨ AI Mock Assistant</h3>
+                    <div class="drawer-header-actions">
+                        <span class="status-dot-badge" style="background: rgba(255,255,255,0.2); color: white; border: none;">
+                            <span class="dot active" style="background: #10b981;"></span> Ready
+                        </span>
+                        <button class="btn-drawer-close" onclick="closeAIDrawer()" style="color: white; opacity: 0.8;">✕</button>
+                    </div>
+                </div>
+
+                <div class="drawer-content scroll-container" style="padding: 20px;">
+                            <!-- ─── AI Assistant Panel ─── -->
+                            <div class="ai-assistant-panel">
+                                <div class="ai-assistant-header">
+                                    <div class="ai-assistant-title">
+                                        <span class="ai-icon">✨</span> <span>Conversational AI</span>
+                                    </div>
+                                    <div class="ai-status-indicator">
+                                        <span class="pulse-dot"></span> Ready
+                                    </div>
+                                </div>
+                                
+                                <div class="ai-chat-container">
+                                    <div class="ai-quick-chips">
+                                        <button class="ai-chip" onclick="simulateAIGenerate()" >🪄 Auto Generate</button>
+                                        <button class="ai-chip warning" onclick="simulateAIBoundary()" >🦠 Inject Boundary</button>
+                                        <button class="ai-chip" onclick="simulateAIMultiLang()" >🌍 UI Overflow Test</button>
+                                        <button class="ai-chip" onclick="document.getElementById('ai-nl-rule-input').value='模拟弱网高延迟(3s)'; simulateAIRuleGen();" >🐢 Simulate 3s Latency</button>
+                                        <button class="ai-chip warning" onclick="document.getElementById('ai-nl-rule-input').value='模拟 Token 失效返回 401'; simulateAIRuleGen();" >🔐 Token Expired 401</button>
+                                        <button class="ai-chip" onclick="document.getElementById('ai-nl-rule-input').value='列表数据倒序排列'; simulateAIRuleGen();" >🔀 Reverse Array</button>
+                                    </div>
+                                    
+                                    <div class="ai-input-wrapper">
+                                        <textarea id="ai-nl-rule-input" class="ai-chat-textarea" placeholder="Describe rule here... e.g. "Set 2s delay" or "Change status to 502""></textarea>
+                                        <button class="btn-ai-send" onclick="simulateAIRuleGen()" title="Send Command">
+                                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                </div>
+            </div>
+    <!-- AI Pet Floating Companion -->
+    <div id="ai-pet-container" class="ai-pet-container" style="display: none;">
+        <!-- Speech Bubble -->
+        <div class="ai-pet-bubble" id="ai-pet-bubble">
+            <span id="ai-pet-bubble-text">AI diagnostic initialized, waiting for requests...</span>
+        </div>
+        
+        <!-- Interactive Pet Wrapper -->
+        <div class="ai-pet-wrapper" onclick="interactWithPet()">
+            <!-- Collapse Button -->
+            <button class="ai-pet-collapse-btn" onclick="togglePetCollapse(event)" title="Collapse Pet">×</button>
+            <div id="ai-pet-svg-wrapper"></div>
+        </div>
+
+        <!-- Growth Stats Panel -->
+        <div class="ai-pet-stats">
+            <div class="stat-row">
+                <span class="stat-label">Level:</span>
+                <span id="ai-pet-level" class="stat-value">Lv.1 (Baby)</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Connected:</span>
+                <span id="ai-pet-time" class="stat-value">0 min</span>
+            </div>
+            <div class="pet-growth-bar-bg">
+                <div id="pet-growth-bar" class="pet-growth-bar-fg" style="width: 0%;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Collapsed Pet Icon -->
+    <div id="ai-pet-collapsed" class="ai-pet-collapsed" onclick="expandPet()" style="display: none;">
+        🐱
+        <span class="badge" id="ai-pet-collapsed-level">Lv.1</span>
+    </div>
+<button class="scroll-top-btn" id="resp-scroll-top-btn" title="回到顶部">↑</button>

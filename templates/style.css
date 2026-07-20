@@ -966,6 +966,7 @@ body {
     pointer-events: auto !important;
 }
 
+/* 列表向下滚动 >= 300px 时由 JS 加上 .visible 才显示 */
 .scroll-top-btn.visible {
     display: flex;
 }

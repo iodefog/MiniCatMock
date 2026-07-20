@@ -23,6 +23,33 @@ from pydantic import BaseModel
 
 app = FastAPI(title="🐱 小猫Mock - 局域网 Mock & 抓包服务器")
 
+# 前端 JS 已按模块拆分为多个文件，运行时按此顺序注入模板占位符。
+# 顺序与原单文件 app.js 完全一致，拼接后等价于原文件，不影响任何功能。
+JS_PLACEHOLDERS = [
+    ("/* {{CORE_PLACEHOLDER}} */", "js/core.js"),
+    ("/* {{LOGS_PLACEHOLDER}} */", "js/logs.js"),
+    ("/* {{JSON_PLACEHOLDER}} */", "js/json-viewer.js"),
+    ("/* {{MOCK_PLACEHOLDER}} */", "js/mock.js"),
+    ("/* {{AI_PLACEHOLDER}} */", "js/ai.js"),
+    ("/* {{PET_PLACEHOLDER}} */", "js/pet.js"),
+]
+
+# 前端 HTML 骨架已按区块拆分为多个 partial 文件，运行时按此顺序注入模板占位符。
+# 顺序与原单文件 index.html 的 DOM 结构完全一致，拼接后等价于原文件，不影响任何功能。
+HTML_PARTIALS = [
+    ("/* {{SIDEBAR_PLACEHOLDER}} */", "html/sidebar.html"),
+    ("/* {{WORKSPACE_PLACEHOLDER}} */", "html/workspace.html"),
+    ("/* {{MODALS_PLACEHOLDER}} */", "html/modals.html"),
+    ("/* {{AI_ASSISTANT_PLACEHOLDER}} */", "html/ai-assistant.html"),
+]
+# 英文版 index_en.html 对应的 partial 文件以 en- 前缀区分，占位符名称保持一致。
+HTML_PARTIALS_EN = [
+    ("/* {{SIDEBAR_PLACEHOLDER}} */", "html/en-sidebar.html"),
+    ("/* {{WORKSPACE_PLACEHOLDER}} */", "html/en-workspace.html"),
+    ("/* {{MODALS_PLACEHOLDER}} */", "html/en-modals.html"),
+    ("/* {{AI_ASSISTANT_PLACEHOLDER}} */", "html/en-ai-assistant.html"),
+]
+
 # 允许所有来源跨域，确保 App 和 Web 面板均可访问
 app.add_middleware(
     CORSMiddleware,
@@ -236,15 +263,37 @@ def get_local_ip():
 async def get_index():
     base_dir = os.path.join(sys._MEIPASS, "templates") if getattr(sys, 'frozen', False) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     
-    with open(os.path.join(base_dir, "index.html"), "r", encoding="utf-8") as f:
+    with open(os.path.join(base_dir, "html", "index.html"), "r", encoding="utf-8") as f:
         html = f.read()
     with open(os.path.join(base_dir, "style.css"), "r", encoding="utf-8") as f:
         css = f.read()
-    with open(os.path.join(base_dir, "app.js"), "r", encoding="utf-8") as f:
-        js = f.read()
-        
+    # index-ui.js 走安全读取：若文件缺失（例如旧版打包未包含），降级为空而非抛出 500，
+    # 页面其余功能仍可正常访问。
+    try:
+        with open(os.path.join(base_dir, "js", "index-ui.js"), "r", encoding="utf-8") as f:
+            index_ui_js = f.read()
+    except FileNotFoundError:
+        index_ui_js = ""
+
     from fastapi import Response
-    content = html.replace("/* {{STYLE_PLACEHOLDER}} */", css).replace("/* {{SCRIPT_PLACEHOLDER}} */", js)
+    # 先注入样式与 UI 辅助脚本，再按模块顺序注入各业务 JS（等价于原 app.js）。
+    # 任一模块文件缺失时降级为空，避免 500。
+    content = html.replace("/* {{STYLE_PLACEHOLDER}} */", css).replace("/* {{INDEX_UI_PLACEHOLDER}} */", index_ui_js)
+    for _placeholder, _fname in HTML_PARTIALS:
+        try:
+            with open(os.path.join(base_dir, _fname), "r", encoding="utf-8") as f:
+                # 去掉文件末尾多余换行，保证注入后的 DOM 与原单文件 HTML 逐字节一致
+                _html_part = f.read().rstrip("\n")
+        except FileNotFoundError:
+            _html_part = ""
+        content = content.replace(_placeholder, _html_part)
+    for _placeholder, _fname in JS_PLACEHOLDERS:
+        try:
+            with open(os.path.join(base_dir, _fname), "r", encoding="utf-8") as f:
+                _js_part = f.read()
+        except FileNotFoundError:
+            _js_part = ""
+        content = content.replace(_placeholder, _js_part)
     return Response(
         content=content,
         media_type="text/html",
@@ -259,15 +308,37 @@ async def get_index():
 async def get_index_en():
     base_dir = os.path.join(sys._MEIPASS, "templates") if getattr(sys, 'frozen', False) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     
-    with open(os.path.join(base_dir, "index_en.html"), "r", encoding="utf-8") as f:
+    with open(os.path.join(base_dir, "html", "index_en.html"), "r", encoding="utf-8") as f:
         html = f.read()
     with open(os.path.join(base_dir, "style.css"), "r", encoding="utf-8") as f:
         css = f.read()
-    with open(os.path.join(base_dir, "app.js"), "r", encoding="utf-8") as f:
-        js = f.read()
-        
+    # index-ui.js 走安全读取：若文件缺失（例如旧版打包未包含），降级为空而非抛出 500，
+    # 页面其余功能仍可正常访问。
+    try:
+        with open(os.path.join(base_dir, "js", "index-ui.js"), "r", encoding="utf-8") as f:
+            index_ui_js = f.read()
+    except FileNotFoundError:
+        index_ui_js = ""
+
     from fastapi import Response
-    content = html.replace("/* {{STYLE_PLACEHOLDER}} */", css).replace("/* {{SCRIPT_PLACEHOLDER}} */", js)
+    # 先注入样式与 UI 辅助脚本，再按模块顺序注入各业务 JS（等价于原 app.js）。
+    # 任一模块文件缺失时降级为空，避免 500。
+    content = html.replace("/* {{STYLE_PLACEHOLDER}} */", css).replace("/* {{INDEX_UI_PLACEHOLDER}} */", index_ui_js)
+    for _placeholder, _fname in HTML_PARTIALS_EN:
+        try:
+            with open(os.path.join(base_dir, _fname), "r", encoding="utf-8") as f:
+                # 去掉文件末尾多余换行，保证注入后的 DOM 与原单文件 HTML 逐字节一致
+                _html_part = f.read().rstrip("\n")
+        except FileNotFoundError:
+            _html_part = ""
+        content = content.replace(_placeholder, _html_part)
+    for _placeholder, _fname in JS_PLACEHOLDERS:
+        try:
+            with open(os.path.join(base_dir, _fname), "r", encoding="utf-8") as f:
+                _js_part = f.read()
+        except FileNotFoundError:
+            _js_part = ""
+        content = content.replace(_placeholder, _js_part)
     return Response(
         content=content,
         media_type="text/html",

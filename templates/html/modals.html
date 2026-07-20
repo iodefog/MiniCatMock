@@ -1,0 +1,142 @@
+    <div class="toast" id="toast">✅ 保存成功！</div>
+
+    <!-- ─── AI Settings Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-settings-modal" style="z-index: 10001;">
+        <div class="ai-modal" style="width: 540px;">
+            <div class="ai-modal-title">⚙️ AI 接口配置</div>
+            <p class="ai-modal-subtitle">配置您的智能大模型 API 密钥，所有数据均存储在您的浏览器本地，绝不上传。</p>
+
+            <div class="ai-modal-row">
+                <div>
+                    <label>服务商</label>
+                    <select id="ai-provider-select" onchange="onAIProviderChange()">
+                        <option value="claude"> Anthropic Claude</option>
+                        <option value="openai"> OpenAI</option>
+                        <option value="deepseek"> DeepSeek</option>
+                        <option value="custom"> 🔧 自定义 (OpenAI 格式)</option>
+                    </select>
+                </div>
+                <div>
+                    <label>模型名称</label>
+                    <input type="text" id="ai-model-input" list="ai-models-list" placeholder="选择或输入模型名..."
+                        autocomplete="off">
+                    <datalist id="ai-models-list"></datalist>
+                </div>
+            </div>
+
+            <div>
+                <label>API Key</label>
+                <div style="position:relative;">
+                    <input type="password" id="ai-api-key-input" placeholder="sk-..." autocomplete="off"
+                        style="padding-right: 70px;">
+                    <button onclick="toggleAIKeyVisibility()"
+                        style="position:absolute; right:6px; top:50%; transform:translateY(-50%); border:none; background:transparent; cursor:pointer; font-size:11px; color:var(--text-dim); padding:4px 8px;">
+                        👁 显示
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <label>AI Cookie</label>
+                <input type="text" id="ai-cookie-input" placeholder="输入 AI 校验 Cookie..." autocomplete="off">
+            </div>
+
+            <div id="ai-custom-endpoint-group" style="display:none;">
+                <label>自定义 API Base URL (以 /v1 结尾)</label>
+                <input type="text" id="ai-custom-endpoint" placeholder="例如：https://api.freemodel.dev/v1">
+            </div>
+
+            <div
+                style="background: var(--surface2); border-radius: var(--radius-md); padding: 12px; font-size: 11px; color: var(--text-muted); line-height: 1.5; border: 1px solid var(--border);">
+                <strong>💡 快捷获取密钥：</strong><br>
+                • <strong>DeepSeek</strong>：<a href="https://platform.deepseek.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">platform.deepseek.com</a> (推荐：极高性价比)<br>
+                • <strong>Claude</strong>：<a href="https://console.anthropic.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">console.anthropic.com</a><br>
+                • <strong>OpenAI</strong>：<a href="https://platform.openai.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">platform.openai.com</a>
+            </div>
+
+            <div class="ai-modal-footer">
+                <button class="btn-modal-cancel" onclick="closeAISettings()">取消</button>
+                <button class="btn-modal-confirm" onclick="saveAISettings()">💾 保存配置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── AI JSON Generate Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-generate-modal">
+        <div class="ai-modal" style="width: 560px;">
+            <div class="ai-modal-title">
+                🌟 AI 智能生成 JSON 数据
+                <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>
+            </div>
+            <p class="ai-modal-subtitle">用自然语言描述您需要的 Mock 数据结构，AI 将自动推理并渲染到右侧编辑器中。</p>
+
+            <div>
+                <label>💬 描述您的 Mock 需求</label>
+                <textarea id="ai-prompt-input"
+                    placeholder="例如：生成一个包含5个商品的列表。每个商品有id、名称、价格（10到100之间）、图片URL、以及库存数量。最外层用 code:200 和 data 字段包裹。"
+                    rows="4" style="resize: vertical; min-height: 80px; max-height: 500px; overflow-y: auto;"
+                    oninput="this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';"></textarea>
+            </div>
+
+            <div id="ai-stream-section" style="display:none; flex-direction: column; gap: 8px;">
+                <label>AI 生成结果预览 <span id="ai-gen-status"
+                        style="font-size:10px; color:var(--accent); font-weight:600;"></span></label>
+                <div class="ai-stream-preview" id="ai-stream-preview"></div>
+            </div>
+
+            <div class="ai-modal-footer">
+                <button class="btn-modal-cancel" id="ai-gen-cancel-btn" onclick="closeAIGenerate()">取消</button>
+                <button class="btn-modal-confirm" id="ai-gen-submit-btn" onclick="runAIGenerate()">🚀 开始生成</button>
+                <button class="btn-modal-confirm" id="ai-gen-fill-btn" onclick="fillAIResult()"
+                    style="display:none; background: var(--green);">✅ 填入编辑器</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── AI Client Model Export Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-model-modal">
+        <div class="ai-modal" style="width: 600px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="ai-modal-title">
+                📱 AI 一键转换客户端 Model 代码
+                <button class="ai-provider-tag"
+                    style="cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text-muted); padding: 2px 6px; margin-left: 8px;"
+                    onclick="openAISettings()" title="配置 AI 服务商或 API Key">⚙️</button>
+            </div>
+            <p class="ai-modal-subtitle">AI 自动解析当前 Mock 响应体，并一键将其生成强类型的客户端模型代码类。</p>
+
+            <div
+                style="display: flex; gap: 8px; margin-bottom: 8px; background: var(--surface2); padding: 4px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0;">
+                <button class="toggle-btn active" id="btn-model-lang-swift" onclick="switchModelLang('Swift')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: var(--accent); color: white; border-radius: var(--radius-sm);">Swift
+                    (iOS)</button>
+                <button class="toggle-btn" id="btn-model-lang-kotlin" onclick="switchModelLang('Kotlin')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">Kotlin</button>
+                <button class="toggle-btn" id="btn-model-lang-typescript" onclick="switchModelLang('TypeScript')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">TypeScript</button>
+                <button class="toggle-btn" id="btn-model-lang-dart" onclick="switchModelLang('Dart')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">Dart
+                    (Flutter)</button>
+            </div>
+
+            <div style="flex: 1; min-height: 250px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-shrink: 0;">
+                    <span style="font-weight: 700; font-size: 12px;">生成的强类型代码：</span>
+                    <span id="ai-model-status" style="font-size:10px; color:var(--accent); font-weight:700;"></span>
+                </div>
+                <div style="flex: 1; min-height: 0; overflow: hidden;">
+                    <pre id="ai-model-preview" class="ai-stream-preview"
+                        style="height: 100%; max-height: none; margin: 0;"></pre>
+                </div>
+            </div>
+
+            <div class="ai-modal-footer"
+                style="padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0;">
+                <button class="btn-modal-cancel" onclick="closeAIModelGen()">关闭</button>
+                <button class="btn-modal-confirm" id="btn-copy-model-code" onclick="copyModelCode()">📋 复制模型代码</button>
+            </div>
+        </div>
+    </div>
+

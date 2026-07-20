@@ -1,0 +1,142 @@
+    <div class="toast" id="toast">✅ 保存成功！</div>
+
+    <!-- ─── AI Settings Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-settings-modal" style="z-index: 10001;">
+        <div class="ai-modal" style="width: 540px;">
+            <div class="ai-modal-title">⚙️ AI API Configuration</div>
+            <p class="ai-modal-subtitle">Configure your LLM API keys. All data is saved locally in your browser and never uploaded.</p>
+
+            <div class="ai-modal-row">
+                <div>
+                    <label>Provider</label>
+                    <select id="ai-provider-select" onchange="onAIProviderChange()">
+                        <option value="claude"> Anthropic Claude</option>
+                        <option value="openai"> OpenAI</option>
+                        <option value="deepseek"> DeepSeek</option>
+                        <option value="custom"> 🔧 Custom (OpenAI style)</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Model Name</label>
+                    <input type="text" id="ai-model-input" list="ai-models-list" placeholder="Select or enter model..."
+                        autocomplete="off">
+                    <datalist id="ai-models-list"></datalist>
+                </div>
+            </div>
+
+            <div>
+                <label>API Key</label>
+                <div style="position:relative;">
+                    <input type="password" id="ai-api-key-input" placeholder="sk-..." autocomplete="off"
+                        style="padding-right: 70px;">
+                    <button onclick="toggleAIKeyVisibility()"
+                        style="position:absolute; right:6px; top:50%; transform:translateY(-50%); border:none; background:transparent; cursor:pointer; font-size:11px; color:var(--text-dim); padding:4px 8px;">
+                        👁 Show
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <label>AI Cookie</label>
+                <input type="text" id="ai-cookie-input" placeholder="Input AI cookie..." autocomplete="off">
+            </div>
+
+            <div id="ai-custom-endpoint-group" style="display:none;">
+                <label>Custom API Base URL (ends with /v1)</label>
+                <input type="text" id="ai-custom-endpoint" placeholder="例如：https://api.freemodel.dev/v1">
+            </div>
+
+            <div
+                style="background: var(--surface2); border-radius: var(--radius-md); padding: 12px; font-size: 11px; color: var(--text-muted); line-height: 1.5; border: 1px solid var(--border);">
+                <strong>💡 Quick API Keys:</strong><br>
+                • <strong>DeepSeek</strong>：<a href="https://platform.deepseek.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">platform.deepseek.com</a> (Recommended: high price-performance)<br>
+                • <strong>Claude</strong>：<a href="https://console.anthropic.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">console.anthropic.com</a><br>
+                • <strong>OpenAI</strong>：<a href="https://platform.openai.com" target="_blank"
+                    style="color:var(--accent); text-decoration: none;">platform.openai.com</a>
+            </div>
+
+            <div class="ai-modal-footer">
+                <button class="btn-modal-cancel" onclick="closeAISettings()">Cancel</button>
+                <button class="btn-modal-confirm" onclick="saveAISettings()">💾 Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── AI JSON Generate Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-generate-modal">
+        <div class="ai-modal" style="width: 560px;">
+            <div class="ai-modal-title">
+                🌟 AI-Powered JSON Generation
+                <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>
+            </div>
+            <p class="ai-modal-subtitle">Describe the mock data structure in natural language, and AI will automatically infer and render it in the editor.</p>
+
+            <div>
+                <label>💬 Describe your mock requirement</label>
+                <textarea id="ai-prompt-input"
+                    placeholder="e.g. Generate a list containing 5 items. Each item has id, name, price (between 10-100), imageUrl, and stock. Wrap with code:200 and data field."
+                    rows="4" style="resize: vertical; min-height: 80px; max-height: 500px; overflow-y: auto;"
+                    oninput="this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';"></textarea>
+            </div>
+
+            <div id="ai-stream-section" style="display:none; flex-direction: column; gap: 8px;">
+                <label>AI Generation Preview <span id="ai-gen-status"
+                        style="font-size:10px; color:var(--accent); font-weight:600;"></span></label>
+                <div class="ai-stream-preview" id="ai-stream-preview"></div>
+            </div>
+
+            <div class="ai-modal-footer">
+                <button class="btn-modal-cancel" id="ai-gen-cancel-btn" onclick="closeAIGenerate()">Cancel</button>
+                <button class="btn-modal-confirm" id="ai-gen-submit-btn" onclick="runAIGenerate()">🚀 Generate</button>
+                <button class="btn-modal-confirm" id="ai-gen-fill-btn" onclick="fillAIResult()"
+                    style="display:none; background: var(--green);">✅ Fill Editor</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── AI Client Model Export Modal ─── -->
+    <div class="ai-modal-overlay" id="ai-model-modal">
+        <div class="ai-modal" style="width: 600px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="ai-modal-title">
+                📱 One-Click Client Model Code Conversion
+                <button class="ai-provider-tag"
+                    style="cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text-muted); padding: 2px 6px; margin-left: 8px;"
+                    onclick="openAISettings()" title="配置 AI Provider或 API Key">⚙️</button>
+            </div>
+            <p class="ai-modal-subtitle">AI automatically parses the current mock response body and converts it to client model code classes.</p>
+
+            <div
+                style="display: flex; gap: 8px; margin-bottom: 8px; background: var(--surface2); padding: 4px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0;">
+                <button class="toggle-btn active" id="btn-model-lang-swift" onclick="switchModelLang('Swift')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: var(--accent); color: white; border-radius: var(--radius-sm);">Swift
+                    (iOS)</button>
+                <button class="toggle-btn" id="btn-model-lang-kotlin" onclick="switchModelLang('Kotlin')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">Kotlin</button>
+                <button class="toggle-btn" id="btn-model-lang-typescript" onclick="switchModelLang('TypeScript')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">TypeScript</button>
+                <button class="toggle-btn" id="btn-model-lang-dart" onclick="switchModelLang('Dart')"
+                    style="flex: 1; padding: 6px; font-size: 11px; border: none; cursor: pointer; background: transparent; color: var(--text-muted);">Dart
+                    (Flutter)</button>
+            </div>
+
+            <div style="flex: 1; min-height: 250px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-shrink: 0;">
+                    <span style="font-weight: 700; font-size: 12px;">Generated Strong-typed Code:</span>
+                    <span id="ai-model-status" style="font-size:10px; color:var(--accent); font-weight:700;"></span>
+                </div>
+                <div style="flex: 1; min-height: 0; overflow: hidden;">
+                    <pre id="ai-model-preview" class="ai-stream-preview"
+                        style="height: 100%; max-height: none; margin: 0;"></pre>
+                </div>
+            </div>
+
+            <div class="ai-modal-footer"
+                style="padding-top: 12px; border-top: 1px solid var(--border); flex-shrink: 0;">
+                <button class="btn-modal-cancel" onclick="closeAIModelGen()">Close</button>
+                <button class="btn-modal-confirm" id="btn-copy-model-code" onclick="copyModelCode()">📋 Copy Model Code</button>
+            </div>
+        </div>
+    </div>
+
