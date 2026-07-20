@@ -20,7 +20,7 @@
 
                 <div class="search-filter-container">
                     <div class="search-input-wrapper">
-                        <span class="search-icon-inside" style="color: var(--purple);">✧</span>
+                        <span class="search-icon-inside" id="log-ai-search-toggle" onclick="toggleAISearch()" title="Toggle AI semantic search" style="color: var(--purple); cursor: pointer; border: 1px solid transparent; border-radius: 6px; padding: 2px 5px;">✧</span>
                         <input type="text" id="log-search-input" placeholder="AI natural language search..."
                             oninput="filterLogs()">
                     </div>
@@ -137,8 +137,22 @@
                                         <input type="text" id="global-ai-path" placeholder="/api/v1/user/profile" style="flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 12px; outline: none; font-family: monospace;" />
                                     </div>
 
+                                    <div class="ai-quick-chips" style="margin-bottom: 2px;">
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('generate','global-ai-prompt')" data-i18n="ai_chip_generate">🪄 Auto Generate</button>
+                                        <button type="button" class="ai-chip warning" onclick="insertQuickActionPrompt('boundary','global-ai-prompt')" data-i18n="ai_chip_boundary">🦠 Inject Boundary</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('multilang','global-ai-prompt')" data-i18n="ai_chip_multilang">🌍 UI Overflow Test</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('network','global-ai-prompt')" data-i18n="ai_chip_network">🐢 Simulate 3s Latency</button>
+                                        <button type="button" class="ai-chip warning" onclick="insertQuickActionPrompt('token','global-ai-prompt')" data-i18n="ai_chip_token">🔐 Token Expired 401</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('reverse','global-ai-prompt')" data-i18n="ai_chip_reverse">🔀 Reverse Array</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('findParams','global-ai-prompt')" data-i18n="ai_chip_find_params">🔎 Find Params</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('modifyField','global-ai-prompt')" data-i18n="ai_chip_modify_field">✏️ Modify/Add Field</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('findLevel','global-ai-prompt')" data-i18n="ai_chip_find_level">📍 Field Level</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('genRelated','global-ai-prompt')" data-i18n="ai_chip_gen_related">🧩 Gen Related</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('replay','global-ai-prompt')" data-i18n="ai_chip_replay">🔁 Re-request</button>
+                                    </div>
+
                                     <div style="position: relative;">
-                                        <textarea id="global-ai-prompt" placeholder="Describe the JSON structure you need... e.g. a user profile with id, nickname, and VIP level (1-5), wrapped inside code=0." rows="3" style="width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 12px 100px 12px 12px; font-size: 12px; line-height: 1.5; resize: none; outline: none; transition: border-color 0.2s; min-height: 90px;"></textarea>
+                                        <textarea id="global-ai-prompt" placeholder="Describe the mock data or interface action you need (inject latency, re-request, etc.)... e.g. a user profile with id, nickname, avatar and VIP level (1-5), wrapped in code=0. Or click a quick chip above to auto-fill." rows="5" style="width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 12px 100px 12px 12px; font-size: 12px; line-height: 1.5; resize: none; outline: none; transition: border-color 0.2s; min-height: 150px;"></textarea>
                                         <button class="btn-purple" id="btn-global-ai-generate" onclick="runGlobalAIGenerate()" style="position: absolute; right: 8px; bottom: 8px; padding: 6px 14px; font-size: 11px; display: flex; align-items: center; gap: 4px; border-radius: 6px; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.25); height: 28px; line-height: 1;">
                                             <span>🚀 Generate Rule</span>
                                         </button>
@@ -149,7 +163,7 @@
                                             <span style="color: var(--text-muted); font-weight: 500;">AI Stream Preview</span>
                                             <span id="global-ai-gen-status" style="color: var(--purple); font-weight: 600;">Generating...</span>
                                         </div>
-                                        <div id="global-ai-stream-preview" style="padding: 12px; font-family: monospace; font-size: 11px; max-height: 180px; overflow-y: auto; color: var(--text); white-space: pre-wrap; word-break: break-all; background: var(--surface);"></div>
+                                        <div id="global-ai-stream-preview" style="padding: 12px; font-family: monospace; font-size: 11px; max-height: 420px; overflow-y: auto; color: var(--text); white-space: pre-wrap; word-break: break-all; background: var(--surface);"></div>
                                         <div style="padding: 8px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border);">
                                             <button class="btn-secondary" onclick="discardGlobalAIResult()" style="padding: 4px 10px; font-size: 11px;">Discard</button>
                                             <button class="btn-green" onclick="saveGlobalAIResult()" style="padding: 4px 12px; font-size: 11px; background: var(--green); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">💾 Save Mock Rule</button>
@@ -280,7 +294,7 @@
                         </div>
                     </div>
                     <div id="details-layout" class="details-full" style="display: none; height: 100%;">
-                        <div class="middle-header" style="padding-left: 20px; padding-right: 20px; border-bottom: none; padding-top: 16px; padding-bottom: 0;">
+                        <div class="middle-header" style="display: flex !important; flex-direction: row !important; justify-content: flex-start !important; align-items: center !important; padding: 14px 20px !important; border-bottom: none !important;">
                             <h2 class="middle-title">Request Viewer</h2>
                             <div class="middle-actions">
                                 <button class="btn-ai-entry" onclick="openAIDrawer()" title="AI Mock Config" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(126, 34, 206, 0.2);" >✨ Summon AI Assistant</button>

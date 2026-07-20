@@ -320,6 +320,31 @@ function closeMockDrawer() {
     }, 300);
 }
 
+// ─── AI 助手抽屉 ───
+// 与 Mock 抽屉共用 .mock-drawer / .drawer-open 样式；overlay 在 ai-assistant.html 中定义。
+function openAIDrawer() {
+    const panel = document.getElementById('ai-panel');
+    const overlay = document.getElementById('ai-drawer-overlay');
+    if (!panel) return;
+    panel.classList.add('drawer-open');
+    if (overlay) {
+        overlay.style.display = 'block';
+        // 延迟添加 active 以触发过渡动画
+        setTimeout(() => overlay.classList.add('active'), 10);
+    }
+}
+
+function closeAIDrawer() {
+    const panel = document.getElementById('ai-panel');
+    const overlay = document.getElementById('ai-drawer-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+        // 等待过渡动画结束后隐藏 overlay
+        setTimeout(() => { overlay.style.display = 'none'; }, 300);
+    }
+    if (panel) panel.classList.remove('drawer-open');
+}
+
 function handleSaveSuccess(data, rule) {
     if (data.new_name && data.new_name !== rule.name) {
         rule.name = data.new_name;

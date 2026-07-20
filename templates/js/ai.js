@@ -546,6 +546,57 @@ async function streamViaProxy(cfg, systemPrompt, userPrompt, previewEl, statusEl
     }
 }
 
+// ─── 非流式 AI 调用：收集完整文本后返回（供语义搜索等需要结构化解析的场景）───
+async function callAIComplete(cfg, systemPrompt, userPrompt) {
+    const resp = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            provider: cfg.provider,
+            model: cfg.model || 'deepseek-chat',
+            api_key: cfg.apiKey,
+            endpoint: cfg.endpoint || null,
+            system_prompt: systemPrompt,
+            user_prompt: userPrompt
+        })
+    });
+    if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`代理请求失败 HTTP ${resp.status}: ${errText}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    const isClaude = (cfg.provider === 'claude');
+    let buffer = '';
+    let full = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+            try {
+                const json = JSON.parse(data);
+                if (json.error) throw new Error(json.error);
+                let delta = '';
+                if (isClaude) {
+                    if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta') delta = json.delta.text;
+                } else {
+                    delta = json.choices?.[0]?.delta?.content || '';
+                }
+                if (delta) full += delta;
+            } catch (parseErr) {
+                if (parseErr.message && !parseErr.message.startsWith('JSON')) throw parseErr;
+            }
+        }
+    }
+    return full;
+}
+
 // ─── 将 AI 生成结果填入 JSON 编辑器 ───
 function fillAIResult() {
     if (!aiGeneratedText) return;

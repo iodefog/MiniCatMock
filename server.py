@@ -546,6 +546,69 @@ async def replay_request(data: ReplayRequestModel):
         "data": resp_json
     }
 
+class CurlRequestModel(BaseModel):
+    path: str  # 例如 /drama-box/sf001/list
+
+@app.post("/api/curl")
+async def curl_request(data: CurlRequestModel):
+    """根据已捕获的真实请求拼出一条 curl 命令并在后台执行，返回命令与真实结果。
+
+    用于「重新请求一次某接口」这类需求：从抓包记录里找到该接口最近一次真实请求，
+    原样还原 method / url / headers / body，用 subprocess 调 curl 真正打到上游，回显命令与响应。
+    """
+    norm = data.path.strip().lstrip("/").lower()
+    target = None
+    for log in reversed(captured_requests):
+        lp = (log.get("path") or "").lstrip("/").lower()
+        ou = (log.get("original_url") or "").lower()
+        if lp == norm or (norm and (norm in ou or ou.endswith(norm) or lp.endswith(norm))):
+            target = log
+            break
+    if not target:
+        return {"found": False,
+                "error": f"未找到接口 {data.path} 的已捕获请求，无法重放（请先让 App 请求过该接口，或通过 x-original-url 记录到真实目标）"}
+
+    url = target.get("original_url") or target.get("url")
+    method = target.get("method", "GET")
+    excluded_headers = {
+        "host", "x-original-url", "x-original-host", "content-length",
+        "x-forwarded-proto", "x-forwarded-for", "x-forwarded-port",
+        "x-forwarded-host", "x-real-ip", "x-scheme",
+        "connection", "keep-alive", "x-encrypt-type",
+    }
+    headers = {k: v for k, v in (target.get("headers") or {}).items() if k.lower() not in excluded_headers}
+    body = target.get("body")
+
+    # 拼 curl 命令（列表形式执行，避免 shell 注入；display 仅用于回显）
+    cmd = ["curl", "-sS", "-X", method, url]
+    for k, v in headers.items():
+        cmd += ["-H", f"{k}: {v}"]
+    if body is not None:
+        data_str = json.dumps(body, ensure_ascii=False) if isinstance(body, (dict, list)) else str(body)
+        cmd += ["--data", data_str]
+    cmd += ["-w", "\n__HTTP_STATUS__:%{http_code}"]
+
+    display = " ".join(cmd)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        out = proc.stdout or ""
+        status = None
+        m = re.search(r"__HTTP_STATUS__:(\d+)", out)
+        if m:
+            status = int(m.group(1))
+            out = out[:m.start()].rstrip()
+        return {
+            "found": True,
+            "command": display,
+            "output": out,
+            "status_code": status,
+            "stderr": proc.stderr or "",
+        }
+    except FileNotFoundError:
+        return {"found": True, "command": display, "error": "服务器未安装 curl 命令，无法执行重放"}
+    except Exception as e:
+        return {"found": True, "command": display, "error": f"curl 执行失败: {str(e)}"}
+
 class AIChatPayload(BaseModel):
     provider: str          # "deepseek" | "claude" | "openai" | "custom"
     model: str

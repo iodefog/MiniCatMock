@@ -2980,6 +2980,16 @@ body.resizing {
     border-color: #ef4444;
 }
 
+.ai-chip.info {
+    color: #2563eb;
+    border-color: rgba(37, 99, 235, 0.2);
+}
+
+.ai-chip.info:hover {
+    background: #eff6ff;
+    border-color: #2563eb;
+}
+
 .ai-input-wrapper {
     position: relative;
     display: flex;
@@ -2987,7 +2997,7 @@ body.resizing {
 
 .ai-chat-textarea {
     width: 100%;
-    height: 60px;
+    height: 400px;
     padding: 12px 40px 12px 12px;
     border-radius: 12px;
     border: 1px solid rgba(139, 92, 246, 0.3);

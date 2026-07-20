@@ -580,7 +580,82 @@ function setLogFilter(filterType, element) {
 
 // ─── 搜索框输入触发过滤 ───
 function filterLogs() {
+    const input = document.getElementById('log-search-input');
+    const q = input ? input.value.trim() : '';
+    if (window.aiSearchMode) {
+        if (!q) { window.aiSearchCondition = null; renderFilteredLogs(); return; }
+        // AI 语义搜索模式：防抖触发意图解析，期间先用已有条件即时渲染
+        clearTimeout(window._aiSearchTimer);
+        window._aiSearchTimer = setTimeout(() => runAISemanticSearch(q), 700);
+        renderFilteredLogs();
+        return;
+    }
     renderFilteredLogs();
+}
+
+// ─── AI 语义搜索：切换模式 ───
+function toggleAISearch() {
+    window.aiSearchMode = !window.aiSearchMode;
+    const icon = document.getElementById('log-ai-search-toggle');
+    const input = document.getElementById('log-search-input');
+    if (icon) {
+        if (window.aiSearchMode) {
+            icon.style.background = 'var(--purple)';
+            icon.style.color = '#fff';
+            icon.style.borderColor = 'var(--purple)';
+            icon.title = 'AI 语义搜索：开（点击关闭）';
+        } else {
+            icon.style.background = 'transparent';
+            icon.style.color = 'var(--purple)';
+            icon.style.borderColor = 'transparent';
+            icon.title = '切换 AI 语义搜索';
+        }
+    }
+    if (input) {
+        input.placeholder = window.aiSearchMode
+            ? (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI search: e.g. "all requests of sf001/list"' : 'AI 语义搜索：如"提取所有 sf001/list 的请求"')
+            : (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI natural language search...' : 'AI 自然语言搜索 / 搜索路径...');
+    }
+    if (!window.aiSearchMode) window.aiSearchCondition = null;
+    if (window.aiSearchMode && input && input.value.trim()) {
+        runAISemanticSearch(input.value.trim());
+    } else {
+        renderFilteredLogs();
+    }
+}
+
+// ─── AI 语义搜索：把自然语言解析为过滤条件并应用 ───
+async function runAISemanticSearch(query) {
+    const cfg = loadAIConfig();
+    if (!cfg.apiKey) {
+        showToast((typeof currentLang !== 'undefined' && currentLang === 'en' ? '⚠️ Please configure API Key for AI search' : '⚠️ 请先配置 API Key 才能使用 AI 语义搜索'), '#f59e0b');
+        return;
+    }
+    try {
+        const systemPrompt = `你是一个日志搜索条件解析器。根据用户的中文/英文自然语言，提取过滤条件并以纯 JSON 返回，不要任何解释或 Markdown。
+字段定义：
+- pathContains: 字符串，若用户提到某个接口路径(如 sf001/list)，取其路径片段(不含域名、不含查询参数)
+- method: 字符串，HTTP 方法 GET/POST/PUT/DELETE 之一，若提及
+- statusMin: 数字，若提及"错误/失败/异常/出错"则给 400，否则省略
+- onlyMock: 布尔，若提及"mock/模拟/命中"则为 true
+- onlyPass: 布尔，若提及"透传/未命中/代理"则为 true
+- keywords: 字符串数组，其他需要全文匹配的关键词
+示例："提取所有 sf001/list 的请求" => {"pathContains":"sf001/list"}
+只返回 JSON。`;
+        const text = await callAIComplete(cfg, systemPrompt, query);
+        let cond = null;
+        try {
+            const m = text.match(/\{[\s\S]*\}/);
+            cond = m ? JSON.parse(m[0]) : null;
+        } catch (e) { cond = null; }
+        window.aiSearchCondition = cond;
+        if (!cond) {
+            showToast((typeof currentLang !== 'undefined' && currentLang === 'en' ? '🤖 Could not parse intent, showing all' : '🤖 未能解析搜索意图，已显示全部'), '#a855f7');
+        }
+        renderFilteredLogs();
+    } catch (e) {
+        showToast('AI 语义搜索失败: ' + e.message, '#ef4444');
+    }
 }
 
 // ─── 渲染过滤后的日志列表 ───
@@ -598,7 +673,8 @@ function renderFilteredLogs() {
     const searchQuery = (document.getElementById('log-search-input')?.value || '').toLowerCase().trim();
     const filterType = window.currentLogFilter;
 
-    // 进行智能双向检索
+    // 进行智能双向检索（普通模式 + AI 语义模式）
+    const aiActive = window.aiSearchMode && !!window.aiSearchCondition;
     const filtered = window.allCapturedLogs.filter(log => {
         // 1. HTTP 方法 / Mock 状态分类过滤 (始终生效)
         if (filterType === 'GET' && log.method !== 'GET') return false;
@@ -610,8 +686,23 @@ function renderFilteredLogs() {
         // 1.5 过滤根路径日志 (开启过滤日志时，隐藏 path 仅为 "/" 的请求)
         if (window.filterLogsEnabled && log.path === '/') return false;
 
-        // 2. 检索框匹配 (支持过滤 Path, Method, Query参数, RequestBody, Headers)
-        if (searchQuery) {
+        // 2a. AI 语义搜索条件（结构化过滤，优先于普通子串匹配）
+        if (aiActive) {
+            const c = window.aiSearchCondition;
+            if (c.pathContains && !(log.path || '').toLowerCase().includes(String(c.pathContains).toLowerCase())) return false;
+            if (c.method && (log.method || '').toUpperCase() !== String(c.method).toUpperCase()) return false;
+            if (c.statusMin && !(log.status >= c.statusMin)) return false;
+            if (c.onlyMock && !log.mock_matched) return false;
+            if (c.onlyPass && log.mock_matched) return false;
+            if (c.keywords && Array.isArray(c.keywords) && c.keywords.length) {
+                const hay = ((log.path || '') + ' ' + (log.method || '') + ' ' + JSON.stringify(log.query_params || {}) + ' ' + JSON.stringify(log.body || {})).toLowerCase();
+                if (!c.keywords.some(k => hay.includes(String(k).toLowerCase()))) return false;
+            }
+            return true;
+        }
+
+        // 2b. 普通子串检索 (支持过滤 Path, Method, Query参数, RequestBody, Headers)
+        if (searchQuery && !window.aiSearchMode) {
             const pathMatch = (log.path || '').toLowerCase().includes(searchQuery);
             const methodMatch = (log.method || '').toLowerCase().includes(searchQuery);
 

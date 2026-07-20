@@ -548,11 +548,475 @@ function triggerChatterBubble() {
 
 // ─── 全局 AI Mock 规则生成 ───
 let globalAiGeneratedText = '';
+
+// 从自然语言描述中提取接口路径（如 sf001/list、/api/v1/user/profile）。
+// 规则：优先匹配"链接/路径/接口/url 为 xxx"后跟随的路径；否则回退到全局匹配
+// 首个"含至少一个斜杠、由字母数字/_-组成的段"的 token。找到后统一补上前导 /。
+function extractPathFromPrompt(text) {
+    if (!text) return '';
+    // 含至少一个 / 分隔的路径 token，允许结尾带 .json 等扩展名
+    const pathToken = '\\/?[A-Za-z0-9_\\-]+(?:\\/[A-Za-z0-9_\\-.]+)+';
+    // 1) 关键词引导：链接/路径/接口/地址/url 为/是/: xxx
+    const kw = new RegExp('(?:链接|路径|接口|地址|url|URL|api|API)\\s*(?:为|是|:|：|=)?\\s*(' + pathToken + ')');
+    let m = text.match(kw);
+    if (!m) {
+        // 2) 全局回退：抓第一个符合路径形态的 token
+        m = text.match(new RegExp(pathToken));
+    }
+    if (!m) return '';
+    let p = (m[1] || m[0]).trim();
+    if (!p) return '';
+    if (!p.startsWith('/')) p = '/' + p;
+    return p;
+}
+
+// 从已捕获请求列表(/api/logs)中匹配与目标路径一致的真实请求，作为 AI 生成时的参考依据。
+// 匹配策略：忽略前导 / 后，path 相等或以目标结尾/包含，优先返回带有响应体或请求体的那条。
+async function findReferenceRequest(targetPath) {
+    try {
+        const res = await fetch('/api/logs');
+        const logs = await res.json();
+        if (!Array.isArray(logs) || !targetPath) return null;
+        const norm = targetPath.replace(/^\/+/, '').toLowerCase();
+        if (!norm) return null;
+        let best = null;
+        for (const log of logs) {
+            const lp = (log.path || '').replace(/^\/+/, '').toLowerCase();
+            const hit = lp === norm || lp.endsWith('/' + norm) || norm.endsWith('/' + lp) || (norm && lp.includes(norm));
+            if (!hit) continue;
+            // 优先选携带了响应体或请求体的请求，参考价值更高
+            if (!best || (log.mock_response || log.body)) best = log;
+        }
+        return best;
+    } catch (e) {
+        return null;
+    }
+}
+
+// 把匹配到的真实请求整理成可读文本，注入给 AI 作为"依赖已有接口"的参考。
+function buildReferenceText(log) {
+    if (!log) return '';
+    const parts = [];
+    parts.push(`参考请求：\n- 方法(Method): ${log.method || ''}\n- 路径(Path): ${log.path || ''}`);
+    if (log.query_params && Object.keys(log.query_params).length) {
+        parts.push(`- Query 参数: ${JSON.stringify(log.query_params)}`);
+    }
+    if (log.body) {
+        const b = typeof log.body === 'string' ? log.body : JSON.stringify(log.body);
+        if (b && b !== 'null' && b.trim()) parts.push(`- 请求体(Request Body): ${b}`);
+    }
+    if (log.mock_response) {
+        parts.push(`- 已有响应体(Response 结构参考): ${log.mock_response}`);
+    }
+    return parts.join('\n');
+}
+
+// ─── 快捷指令提示词（AI 实验室 与 AI Mock 助手 共用，保证功能与 UI 对齐）───
+// 点击快捷指令芯片时，把对应的「完善提示语」填入目标输入框，不自动执行，由用户确认后再生成。
+const QUICK_ACTION_PROMPTS = {
+    generate: {
+        zh: '请为当前接口一键生成一个完整、真实可信的 Mock 数据集：包含 id、名称、头像 URL、状态、创建时间等常见字段，以数组形式返回 10 条，外层统一包裹为 {"code": 200, "message": "success", "data": {"list": [...], "total": 10, "page": 1}}。',
+        en: 'Generate a complete, realistic Mock dataset for the current endpoint: include id, name, avatar URL, status, createdAt and other common fields, return an array of 10 items, wrapped as {"code": 200, "message": "success", "data": {"list": [...], "total": 10, "page": 1}}.'
+    },
+    boundary: {
+        zh: '请注入边界与脏数据测试用例：覆盖超长字符串、emoji 表情、特殊字符(<>&\'")、null、空字符串、空数组、负数、极大值与极小值、SQL 注入片段与脚本片段，用于验证接口健壮性。',
+        en: 'Inject boundary and dirty-data test cases: cover extra-long strings, emoji, special chars (<>&\'"), null, empty string, empty array, negative numbers, very large/small numbers, SQL injection and script snippets, to validate API robustness.'
+    },
+    multilang: {
+        zh: '请生成用于 UI 撑破测试的数据：超长标题与描述文本、超长列表(50+ 条)、深层嵌套对象(5 层以上)、超长字段名，验证前端渲染不崩溃、布局不溢出。',
+        en: 'Generate UI-stress-test data: extra-long title/description text, an extra-long list (50+ items), deeply nested objects (5+ levels), and very long field names, to verify the frontend does not crash and layout does not overflow.'
+    },
+    network: {
+        zh: '请为当前接口配置模拟弱网：固定响应延迟 3000ms，并叠加 ±500ms 随机抖动，模拟高延迟/不稳定网络场景。',
+        en: 'Configure simulated weak network for the current endpoint: fixed response latency 3000ms plus ±500ms random jitter, simulating high-latency / unstable network conditions.'
+    },
+    token: {
+        zh: '请模拟 Token 失效场景：当请求携带过期或无效 Token 时，返回 {"code": 401, "message": "Token expired or invalid"}，结构体与成功响应保持一致。',
+        en: 'Simulate token-expired scenario: when the request carries an expired or invalid token, return {"code": 401, "message": "Token expired or invalid"}, keeping the structure consistent with the success response.'
+    },
+    reverse: {
+        zh: '请将列表数据倒序排列（最新数据排在最前），并保持 total、page、pageSize 等分页字段完整且正确。',
+        en: 'Reverse the list order (newest items first) while keeping pagination fields like total, page, pageSize complete and correct.'
+    },
+    // ── 实用查询 / 改造类指令（查找接口、改字段、定位层级、参考生成）──
+    findParams: {
+        zh: '请帮我查找并汇总指定接口（如 xxx 接口）的完整契约信息：① 请求方法、URL 与全部请求参数（query / header / body 字段）；② 已保存或捕获到的请求示例数据；③ 当前返回结果的数据结构与字段说明。请以清晰清单逐项列出，便于我核对接口定义。',
+        en: 'Find and summarize the full contract of the specified endpoint (e.g. xxx): ① request method, URL and all request parameters (query / header / body fields); ② saved or captured example request data; ③ current response structure and field descriptions. List them as a clear checklist for verifying the API definition.'
+    },
+    modifyField: {
+        zh: '请帮我在指定接口（例如 xxx 接口）的返回数据中：把某字段的值修改为指定内容，或在某字段的同级位置下新增一个字段。请直接输出修改后的完整 JSON，并标注改动的具体路径（如 data.list[0].user.name）。',
+        en: 'For the specified endpoint (e.g. xxx), in its response data: change a given field value to the specified content, or add a new field next to a given field at the same level. Output the complete modified JSON and mark the changed paths (e.g. data.list[0].user.name).'
+    },
+    findLevel: {
+        zh: '请帮我在指定接口的返回数据中，定位某个字段位于第几层嵌套（最外层的 data 记为第 1 层），并给出从根节点到该字段的完整路径，方便我做数据提取或断言校验。',
+        en: 'In the specified endpoint response, locate at which nesting depth a given field sits (the outermost data counts as level 1), and give the full path from root to that field, so I can extract or assert on the data.'
+    },
+    genRelated: {
+        zh: '请参考指定接口或某段描述字段，自动生成一组相关/互补的接口（如配套的列表、详情、创建、更新、删除接口），保证字段命名、状态码与响应结构风格一致，并给出每个接口的请求方式与示例响应 JSON。',
+        en: 'Based on a reference endpoint or a description field, auto-generate a set of related/complementary endpoints (e.g. paired list, detail, create, update, delete), keeping field naming, status codes and response structure style consistent, and provide each endpoint method with example response JSON.'
+    },
+    // ── 重新请求（🔁）：点击芯片仅把提示语填入输入框，真正发请求由发送按钮触发 ──
+    replay: {
+        zh: '请通过 curl 重新请求当前接口（自动带上原始请求方法、URL、Header 与 Body），把真实线上响应完整回显给我，用于核对与抓包数据是否一致。',
+        en: 'Re-request the current endpoint via curl (auto-including the original method, URL, headers and body), and show me the complete real live response, so I can verify it against the captured data.'
+    }
+};
+
+// 把快捷指令对应的完善提示语填入指定输入框（覆盖写入，便于用户查看/编辑后点击生成）。
+function insertQuickActionPrompt(actionKey, targetId) {
+    const el = document.getElementById(targetId);
+    if (!el || !QUICK_ACTION_PROMPTS[actionKey]) return;
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    const text = QUICK_ACTION_PROMPTS[actionKey][lang] || QUICK_ACTION_PROMPTS[actionKey].zh;
+    el.value = text;
+    el.focus();
+    if (typeof autoResizeTextarea === 'function') { try { autoResizeTextarea(el); } catch (e) {} }
+}
+
+// 从一段文本里尝试提取接口路径：支持完整 URL（取 path+query）或以 / 开头的路径 token。
+function extractPathFromText(text) {
+    if (!text) return '';
+    let m = text.match(/https?:\/\/[^\s"'，。、]+/);
+    if (m) {
+        try { const u = new URL(m[0]); return (u.pathname + u.search) || ''; } catch (e) {}
+    }
+    m = text.match(/\/[A-Za-z0-9_\-./]+(?:\?[^\s"'，。]*)?/);
+    if (m) return m[0];
+    return '';
+}
+
+// 解析接口路径：优先读调用方指定的输入框；若为空，则回退到其它已知路径输入框
+// （抽屉用 ai-nl-path，AI 实验室用 global-ai-path）；再不行则从指令输入框(ai-nl-rule-input)里
+// 抽取路径 token，避免用户把路径填在别处时仍被提示"需要输入 path"。
+function resolveEndpointPath(preferredId) {
+    const candidates = [preferredId, 'ai-nl-path', 'global-ai-path'];
+    for (const id of candidates) {
+        if (!id) continue;
+        const el = document.getElementById(id);
+        if (el && el.value && el.value.trim()) return el.value.trim();
+    }
+    const ta = document.getElementById('ai-nl-rule-input');
+    if (ta && ta.value && ta.value.trim()) {
+        const p = extractPathFromText(ta.value);
+        if (p) return p;
+    }
+    const gp = document.getElementById('global-ai-prompt');
+    if (gp && gp.value && gp.value.trim()) {
+        const p = extractPathFromText(gp.value);
+        if (p) return p;
+    }
+    return '';
+}
+
+// ─── 重新请求接口：自动拼 curl 并打到上游，回显命令与真实结果 ───
+async function replayInterfaceViaCurl(pathId, outputId, statusId) {
+    const path = resolveEndpointPath(pathId);
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    if (!path) {
+        showToast(lang === 'zh' ? '⚠️ 请先填写接口路径' : '⚠️ Please input the endpoint path first', '#f59e0b');
+        return;
+    }
+    const outputEl = document.getElementById(outputId);
+    const statusEl = statusId ? document.getElementById(statusId) : null;
+    if (!outputEl) return;
+    if (outputId === 'global-ai-stream-preview') {
+        const sec = document.getElementById('global-ai-result-section');
+        if (sec) sec.style.display = 'block';
+    } else {
+        outputEl.style.display = 'block';
+    }
+    if (statusEl) statusEl.textContent = lang === 'zh' ? '⏳ 正在通过 curl 重新请求...' : '⏳ Re-requesting via curl...';
+    outputEl.textContent = lang === 'zh' ? '⏳ 正在通过 curl 重新请求真实接口...' : '⏳ Re-requesting real endpoint via curl...';
+
+    try {
+        const resp = await fetch('/api/curl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        const data = await resp.json();
+        let text;
+        if (!data.found) {
+            text = '❌ ' + (data.error || 'not found');
+        } else {
+            const parts = [
+                (lang === 'zh' ? '🔁 已自动通过 curl 重新请求该接口：' : '🔁 Auto re-requested the endpoint via curl:'),
+                '',
+                '$ ' + (data.command || ''),
+                ''
+            ];
+            if (data.status_code != null) parts.push('HTTP ' + data.status_code, '');
+            parts.push(data.output || '');
+            if (data.stderr) parts.push('', '[stderr]', data.stderr);
+            if (data.error) parts.push('', '❌ ' + data.error);
+            text = parts.join('\n');
+        }
+        outputEl.textContent = text;
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '✅ 已完成' : '✅ Done';
+    } catch (e) {
+        outputEl.textContent = '❌ ' + e.message;
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '❌ 出错' : '❌ Error';
+    }
+}
+
+// 判断用户输入是否像“提问/分析”而非“生成 Mock 规则”。
+// 命中问号或中文疑问词即视为提问，走检索式分析，避免被强制输出纯 JSON。
+function isQuestionLike(text) {
+    if (!text) return false;
+    if (text.includes('?') || text.includes('？')) return true;
+    return /哪个|哪些|哪里|哪几|哪一个|哪几个|什么|怎么|如何|是否|在哪|查询|查找|搜索|搜一下|搜|定位|属于|存在|属于哪个|在哪|在哪个|区别|为什么|为什么|解释/i.test(text);
+}
+
+// 判断是否为「重新请求接口」意图（点击 🔁 芯片填入的提示语，或用户手动输入）。
+// 命中后由发送按钮真正发起 curl 请求，而不是点击芯片时直接发请求。
+function isReplayLike(text) {
+    if (!text) return false;
+    return /重新请求|重新调用|重发|重放|re-?request|replay|curl/i.test(text);
+}
+
+// 从提问中提取可检索的字段名/值：引号字符串、JSON 键名、英文标识符。
+function extractSearchTerms(text) {
+    const terms = new Set();
+    const q = text.match(/"[^"]+"|'[^']+'/g);
+    if (q) q.forEach(s => { const v = s.slice(1, -1).trim(); if (v) terms.add(v); });
+    const k = text.match(/"([^"]+)"\s*:/g);
+    if (k) k.forEach(s => { const m = s.match(/"([^"]+)"\s*:/); if (m) { const v = m[1].trim(); if (v) terms.add(v); } });
+    const w = text.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+    if (w) w.forEach(s => { if (s.length >= 2) terms.add(s); });
+    return Array.from(terms).filter(Boolean);
+}
+
+// 提问型输入的统一处理：在已捕获请求中检索相关接口，再用自然语言回答（不强制 JSON）。
+// 这样“roleName 这个字段在哪个接口里？”会去抓包记录里找含该字段/值的接口，而不是编一段 JSON。
+async function askAIAnalysis(question, cfg, outputEl, statusEl, isDrawer) {
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    if (outputEl) {
+        if (outputEl.id === 'global-ai-stream-preview') {
+            const sec = document.getElementById('global-ai-result-section');
+            if (sec) sec.style.display = 'block';
+        } else {
+            outputEl.style.display = 'block';
+        }
+        outputEl.textContent = '';
+    }
+    if (statusEl) statusEl.textContent = lang === 'zh' ? '⏳ 正在检索已捕获的接口...' : '⏳ Searching captured interfaces...';
+
+    const terms = extractSearchTerms(question);
+
+    let logs = [];
+    try { const res = await fetch('/api/logs'); logs = await res.json(); } catch (e) { logs = []; }
+
+    let matchedAny = false;
+    const contextParts = [];
+
+    // 1) 若用户在路径框填写了接口，优先用它的真实请求作为上下文
+    const pathEl = document.getElementById(isDrawer ? 'ai-nl-path' : 'global-ai-path');
+    const path = pathEl ? pathEl.value.trim() : '';
+    if (path) {
+        const ref = await findReferenceRequest(path);
+        if (ref) { contextParts.push('【指定接口 ' + path + ' 的真实请求】\n' + buildReferenceText(ref)); matchedAny = true; }
+    }
+
+    // 2) 全局检索：在已捕获请求里查找包含这些字段/值的接口（按命中数排序，取前 5）
+    if (Array.isArray(logs) && logs.length) {
+        const ranked = [];
+        for (const log of logs) {
+            const hay = JSON.stringify({
+                path: log.path, method: log.method,
+                query_params: log.query_params, body: log.body, response: log.mock_response
+            });
+            let score = 0; const hits = [];
+            for (const t of terms) {
+                if (t && hay.indexOf(t) !== -1) { score++; if (hits.indexOf(t) === -1) hits.push(t); }
+            }
+            if (score > 0) ranked.push({ log, score, hits });
+        }
+        ranked.sort((a, b) => b.score - a.score);
+        for (const r of ranked.slice(0, 5)) {
+            matchedAny = true;
+            contextParts.push('【命中接口 ' + (r.log.method || '') + ' ' + (r.log.path || '') + '，命中关键词: ' + r.hits.join('、') + '】\n' + buildReferenceText(r.log));
+        }
+    }
+
+    const contextText = matchedAny ? contextParts.join('\n\n') :
+        (lang === 'zh' ? '（未在已捕获的请求记录中匹配到相关接口/字段——这些接口可能尚未在 App 中被请求过，或该字段还未出现在抓包数据里）'
+                      : '(No matching interface/field found in captured requests — these endpoints may not have been requested in the App yet, or the field is not in captured data)');
+
+    const systemPrompt = (lang === 'zh'
+        ? '你是一个专业的 API 分析助手。用户会用自然语言提出与接口、字段相关的问题（例如“某字段在哪个接口里”“某接口返回结构是怎样的”）。请基于下方【已捕获的真实请求记录】用清晰的自然语言回答，可引用接口路径与字段名，必要时给出代码块示例；不要生硬地只输出纯 JSON，除非用户明确要求生成 Mock 数据。'
+        : 'You are a professional API analysis assistant. The user asks natural-language questions about interfaces and fields. Answer clearly in natural language based on the 【captured real request records】 below, citing endpoint paths and field names; do not force pure-JSON output unless the user explicitly asks to generate Mock data.')
+        + '\n\n' + contextText;
+
+    aiGeneratedText = '';
+    aiIsStreaming = true;
+    aiAbortController = new AbortController();
+    try {
+        await streamViaProxy(cfg, systemPrompt, question, outputEl, statusEl || { textContent: '' });
+        // 分析结果是自然语言，不是可保存的 JSON 规则
+        if (isDrawer) {
+            drawerGeneratedText = '';
+            const sb = document.getElementById('ai-nl-save-btn');
+            if (sb) sb.style.display = 'none';
+        } else if (typeof globalAiGeneratedText !== 'undefined') {
+            globalAiGeneratedText = '';
+        }
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '✅ 已回答' : '✅ Answered';
+    } catch (err) {
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '❌ 出错' : '❌ Error';
+        showToast('Analysis failed: ' + err.message, '#ef4444');
+    } finally {
+        aiIsStreaming = false;
+    }
+}
+
+// ─── AI Mock 配置助手：发送按钮（原 simulateAIRuleGen 空壳，现已实现）───
+// 读取自然语言指令 + 可选接口路径，附带该接口真实请求数据作为参考，让 AI 生成 Mock 响应 JSON，
+// 生成后可在结果区一键「保存为规则」。
+let drawerGeneratedText = '';
+async function simulateAIRuleGen() {
+    const input = document.getElementById('ai-nl-rule-input');
+    const instruction = input ? input.value.trim() : '';
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    if (!instruction) {
+        showToast(lang === 'zh' ? '⚠️ 请先输入指令' : '⚠️ Please input a command first', '#f59e0b');
+        return;
+    }
+
+    // 重新请求意图（点击 🔁 芯片填入的提示语）→ 真正发起 curl，不依赖 API Key
+    if (isReplayLike(instruction)) {
+        await replayInterfaceViaCurl('ai-nl-path', 'ai-nl-output', 'ai-nl-output-status');
+        return;
+    }
+
+    const cfg = loadAIConfig();
+    if (!cfg.apiKey) {
+        showToast(lang === 'zh' ? '⚠️ 请先配置 API Key' : '⚠️ Please configure API Key first', '#f59e0b');
+        return;
+    }
+
+    // 提问型输入（而非生成 Mock 规则）→ 走检索式分析，避免被强制输出纯 JSON
+    if (isQuestionLike(instruction)) {
+        const outEl = document.getElementById('ai-nl-output');
+        const stEl = document.getElementById('ai-nl-output-status');
+        await askAIAnalysis(instruction, cfg, outEl, stEl, true);
+        return;
+    }
+
+    const pathEl = document.getElementById('ai-nl-path');
+    const path = pathEl ? pathEl.value.trim() : '';
+    const outputEl = document.getElementById('ai-nl-output');
+    const statusEl = document.getElementById('ai-nl-output-status');
+    if (outputEl) outputEl.style.display = 'block';
+
+    let referenceLog = null;
+    if (path) { try { referenceLog = await findReferenceRequest(path); } catch (e) {} }
+    const referenceText = buildReferenceText(referenceLog);
+
+    const systemPrompt = (lang === 'zh'
+        ? '你是一个 AI Mock 配置助手。根据用户的自然语言指令，为指定接口生成 Mock 响应 JSON。'
+        : 'You are an AI Mock configuration assistant. Based on the user natural-language command, generate the Mock response JSON for the endpoint.')
+        + '要求：只输出合法、可直接解析的纯 JSON，不要 Markdown 代码块标记，不要解释性文字。'
+        + '默认外层结构 {"code":200,"message":"success","data":...}。'
+        + (referenceText ? `\n\n【真实接口参考】\n${referenceText}` : '');
+
+    if (outputEl) outputEl.textContent = '';
+    if (statusEl) statusEl.textContent = lang === 'zh' ? '⏳ 正在生成 Mock 规则...' : '⏳ Generating Mock rule...';
+
+    aiGeneratedText = '';
+    aiIsStreaming = true;
+    aiAbortController = new AbortController();
+    try {
+        await streamViaProxy(cfg, systemPrompt, instruction, outputEl, statusEl || { textContent: '' });
+        drawerGeneratedText = aiGeneratedText;
+        const saveBtn = document.getElementById('ai-nl-save-btn');
+        if (saveBtn) saveBtn.style.display = 'inline-block';
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '✅ 生成完成（可保存为规则）' : '✅ Done (save as rule below)';
+    } catch (err) {
+        if (statusEl) statusEl.textContent = lang === 'zh' ? '❌ 出错' : '❌ Error';
+        showToast('Generate failed: ' + err.message, '#ef4444');
+    } finally {
+        aiIsStreaming = false;
+    }
+}
+
+async function saveDrawerAIResult() {
+    if (!drawerGeneratedText) return;
+    const pathEl = document.getElementById('ai-nl-path');
+    const pathInput = pathEl ? pathEl.value.trim() : '';
+    const methodEl = document.getElementById('ai-nl-method');
+    const method = methodEl ? methodEl.value : 'GET';
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    if (!pathInput) {
+        showToast(lang === 'zh' ? '⚠️ 请先填写接口路径再保存' : '⚠️ Please input the endpoint path before saving', '#f59e0b');
+        return;
+    }
+    let jsonStr = drawerGeneratedText.trim();
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) jsonStr = codeBlockMatch[1].trim();
+    try {
+        JSON.parse(jsonStr);
+    } catch (e) {
+        showToast(lang === 'zh' ? '⚠️ 生成内容非合法 JSON，无法保存为规则' : '⚠️ Generated content is not valid JSON', '#f59e0b');
+        return;
+    }
+    const newRule = {
+        name: `AI_${pathInput.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        url_pattern: pathInput,
+        method: method,
+        enabled: true,
+        delay_ms: 0,
+        response_body: jsonStr,
+        status_code: 200,
+        folder: '未分类'
+    };
+    try {
+        const resp = await fetch('/api/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newRule)
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        showToast(lang === 'zh' ? '🎉 Mock 规则已保存！' : '🎉 Mock rule saved!', '#10b981');
+        if (typeof loadRuleTree === 'function') loadRuleTree();
+    } catch (e) {
+        showToast('Save failed: ' + e.message, '#ef4444');
+    }
+}
+
 async function runGlobalAIGenerate() {
     const cfg = loadAIConfig();
     const prompt = document.getElementById('global-ai-prompt').value.trim();
-    const pathInput = document.getElementById('global-ai-path').value.trim();
+    const pathEl = document.getElementById('global-ai-path');
+    let pathInput = pathEl.value.trim();
     const method = document.getElementById('global-ai-method').value;
+
+    // 路径框为空时，尝试从需求描述中自动提取形如 sf001/list、/api/v1/user 的路径并回填，
+    // 降低"路径必须单独手填"的交互摩擦。提取不到才提示用户手动输入。
+    if (!pathInput && prompt) {
+        const extracted = extractPathFromPrompt(prompt);
+        if (extracted) {
+            pathInput = extracted;
+            pathEl.value = extracted;
+        }
+    }
+
+    // 提问型输入（而非生成 Mock 规则）→ 直接检索已捕获接口并自然语言回答，
+    // 不要求路径、不强制纯 JSON 输出（例如“roleName 这个字段在哪个接口里？”）。
+    if (isQuestionLike(prompt)) {
+        const pv = document.getElementById('global-ai-stream-preview');
+        const st = document.getElementById('global-ai-gen-status');
+        const gb = document.getElementById('btn-global-ai-generate');
+        if (gb) { gb.disabled = true; gb.textContent = (typeof currentLang !== 'undefined' && currentLang === 'en') ? '⏳ Analyzing...' : '⏳ 分析中...'; }
+        await askAIAnalysis(prompt, cfg, pv, st, false);
+        if (gb) { gb.disabled = false; gb.textContent = (typeof currentLang !== 'undefined' && currentLang === 'en') ? '🚀 Generate Rule' : '🚀 生成规则'; }
+        return;
+    }
+
+    // 重新请求意图（点击 🔁 芯片填入的提示语）→ 真正发起 curl，不依赖 API Key
+    if (isReplayLike(prompt)) {
+        await replayInterfaceViaCurl('global-ai-path', 'global-ai-stream-preview', 'global-ai-gen-status');
+        return;
+    }
 
     if (!pathInput) {
         showToast((typeof currentLang !== 'undefined' ? currentLang : 'zh') === 'zh' ? '⚠️ 请先输入 Mock 接口路径' : '⚠️ Please input Mock path first', '#f59e0b');
@@ -583,15 +1047,30 @@ async function runGlobalAIGenerate() {
     aiIsStreaming = true;
     aiAbortController = new AbortController();
 
-    const systemPrompt = `你是一个专业的 Mock API 数据生成助手。
+    // 尝试匹配已捕获的真实请求，作为参考依据，让生成真正"依赖已有接口"而非凭空编造。
+    let referenceLog = null;
+    try {
+        referenceLog = await findReferenceRequest(pathInput);
+    } catch (e) {
+        referenceLog = null;
+    }
+    const referenceText = buildReferenceText(referenceLog);
+
+    let systemPrompt = `你是一个专业的 Mock API 数据生成助手。
 根据用户的描述，生成并返回符合要求的数据。
 要求：
 1. 你输出的内容必须是合法的、可以直接被解析的纯 JSON 格式文本。绝对不能包含任何 Markdown 代码块标记（如 \`\`\`json），绝对不能包含任何解释性文字或对话。
 2. 数字类型合理随机，字符串内容真实可信，不要使用敷衍的占位符。
 3. 默认外层结构为 {"code": 200, "message": "success", "data": ...}。`;
 
+    let finalPrompt = prompt;
+    if (referenceText) {
+        systemPrompt += `\n\n【重要参考】已为你匹配到真实请求 "${pathInput}" 的参考数据。请严格基于以下真实的参数名称、类型与响应结构来生成，保持字段命名与层级结构一致，不要凭空编造字段：\n${referenceText}`;
+        finalPrompt += `\n\n（提示：已检测到接口 ${pathInput} 的参考请求，请基于上面的参考参数 / 响应结构生成）`;
+    }
+
     try {
-        await streamViaProxy(cfg, systemPrompt, prompt, previewEl, statusEl);
+        await streamViaProxy(cfg, systemPrompt, finalPrompt, previewEl, statusEl);
 
         previewEl.classList.remove('streaming');
         statusEl.textContent = (typeof currentLang !== 'undefined' ? currentLang : 'zh') === 'zh' ? '✅ 生成完成' : '✅ Completed';

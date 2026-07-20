@@ -15,7 +15,7 @@
                             <div class="ai-assistant-panel">
                                 <div class="ai-assistant-header">
                                     <div class="ai-assistant-title">
-                                        <span class="ai-icon">✨</span> <span data-i18n="ai_assistant_title">Conversational AI</span>
+                                        <span class="ai-icon">✨</span> <span data-i18n="ai_assistant_title">对话式 AI 助手</span>
                                     </div>
                                     <div class="ai-status-indicator">
                                         <span class="pulse-dot"></span> Ready
@@ -23,13 +23,28 @@
                                 </div>
                                 
                                 <div class="ai-chat-container">
+                                    <div style="display:flex; gap:8px; margin-bottom:10px;">
+                                        <select id="ai-nl-method" style="background: var(--surface2); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 10px; font-size:12px; outline:none; cursor:pointer;">
+                                            <option>GET</option>
+                                            <option selected>POST</option>
+                                            <option>PUT</option>
+                                            <option>DELETE</option>
+                                            <option>PATCH</option>
+                                        </select>
+                                        <input type="text" id="ai-nl-path" placeholder="接口路径，如 /drama-box/sf001/list" style="flex:1; background: var(--surface2); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 12px; font-size:12px; outline:none; font-family:monospace;" />
+                                    </div>
                                     <div class="ai-quick-chips">
-                                        <button class="ai-chip" onclick="simulateAIGenerate()" data-i18n="ai_chip_generate">🪄 一键生成数据</button>
-                                        <button class="ai-chip warning" onclick="simulateAIBoundary()" data-i18n="ai_chip_boundary">🦠 注入边界脏数据</button>
-                                        <button class="ai-chip" onclick="simulateAIMultiLang()" data-i18n="ai_chip_multilang">🌍 UI 撑破测试</button>
-                                        <button class="ai-chip" onclick="document.getElementById('ai-nl-rule-input').value='模拟弱网高延迟(3s)'; simulateAIRuleGen();" data-i18n="ai_chip_network">🐢 模拟弱网</button>
-                                        <button class="ai-chip warning" onclick="document.getElementById('ai-nl-rule-input').value='模拟 Token 失效返回 401'; simulateAIRuleGen();" data-i18n="ai_chip_token">🔐 Token 失效</button>
-                                        <button class="ai-chip" onclick="document.getElementById('ai-nl-rule-input').value='列表数据倒序排列'; simulateAIRuleGen();" data-i18n="ai_chip_reverse">🔀 数据倒序</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('generate','ai-nl-rule-input')" data-i18n="ai_chip_generate">🪄 一键生成数据</button>
+                                        <button type="button" class="ai-chip warning" onclick="insertQuickActionPrompt('boundary','ai-nl-rule-input')" data-i18n="ai_chip_boundary">🦠 注入边界脏数据</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('multilang','ai-nl-rule-input')" data-i18n="ai_chip_multilang">🌍 UI 撑破测试</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('network','ai-nl-rule-input')" data-i18n="ai_chip_network">🐢 模拟弱网</button>
+                                        <button type="button" class="ai-chip warning" onclick="insertQuickActionPrompt('token','ai-nl-rule-input')" data-i18n="ai_chip_token">🔐 Token 失效</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('reverse','ai-nl-rule-input')" data-i18n="ai_chip_reverse">🔀 数据倒序</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('findParams','ai-nl-rule-input')" data-i18n="ai_chip_find_params">🔎 查找接口参数</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('modifyField','ai-nl-rule-input')" data-i18n="ai_chip_modify_field">✏️ 改/增字段</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('findLevel','ai-nl-rule-input')" data-i18n="ai_chip_find_level">📍 字段第几层</button>
+                                        <button type="button" class="ai-chip info" onclick="insertQuickActionPrompt('genRelated','ai-nl-rule-input')" data-i18n="ai_chip_gen_related">🧩 参考生成接口</button>
+                                        <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('replay','ai-nl-rule-input')" data-i18n="ai_chip_replay">🔁 重新请求接口</button>
                                     </div>
                                     
                                     <div class="ai-input-wrapper">
@@ -41,10 +56,19 @@
                                         </button>
                                     </div>
                                 </div>
+
+                                <div id="ai-nl-output" style="display:none; margin-top:12px; background: var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12px; line-height:1.6; white-space:pre-wrap; max-height:420px; overflow:auto; font-family: monospace;"></div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                                    <span id="ai-nl-output-status" style="font-size:11px; color: var(--text-muted);"></span>
+                                    <button type="button" id="ai-nl-save-btn" onclick="saveDrawerAIResult()" style="display:none; padding:4px 12px; font-size:11px; border-radius:6px; border:1px solid var(--border); background: var(--surface2); color: var(--text); cursor:pointer;">💾 保存为规则</button>
+                                </div>
+
                             </div>
 
                 </div>
             </div>
+    <!-- AI Drawer Overlay -->
+    <div id="ai-drawer-overlay" class="drawer-overlay" onclick="closeAIDrawer()" style="display: none;"></div>
     <!-- AI Pet Floating Companion -->
     <div id="ai-pet-container" class="ai-pet-container" style="display: none;">
         <!-- Speech Bubble -->
