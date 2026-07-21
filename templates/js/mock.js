@@ -262,10 +262,15 @@ async function saveRule() {
             body: JSON.stringify(rule)
         });
 
+        let data = null;
+        try {
+            data = await res.json();
+        } catch (e) {
+            data = null;
+        }
+
         if (res.ok) {
-            const data = await res.json();
-            
-            if (data.status === 'prompt_conflict') {
+            if (data && data.status === 'prompt_conflict') {
                 const confirmOverwrite = confirm(`发现相同 Path 和 Matching Params 的规则：[${data.conflict_folder}] ${data.conflict_name}。\n\n点击【确定】将覆盖该规则。\n点击【取消】将另存为新规则。`);
                 if (confirmOverwrite) {
                     rule.overwrite_rule_name = data.conflict_name;
@@ -273,28 +278,34 @@ async function saveRule() {
                 } else {
                     rule.force_new = true;
                 }
-                
+
                 const res2 = await fetch('/api/rules', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(rule)
                 });
-                const data2 = await res2.json();
-                if (data2.status === 'success') {
+                const data2 = await res2.json().catch(() => null);
+                if (data2 && data2.status === 'success') {
                     handleSaveSuccess(data2, rule);
                 } else {
-                    showToast(data2.message || '保存失败', '#ef4444');
+                    showToast('❌ 保存失败：' + (data2 && data2.message ? data2.message : '未知错误'), '#ef4444');
                 }
                 return;
             }
-            
-            if (data.status === 'success') {
+
+            if (data && data.status === 'success') {
                 handleSaveSuccess(data, rule);
             } else {
-                showToast(data.message || '保存失败', '#ef4444');
+                const reason = (data && data.message) ? data.message : '未知错误（后端未返回原因）';
+                showToast('❌ 保存失败：' + reason, '#ef4444');
             }
         } else {
-            showToast('❌ 保存失败', '#ef4444');
+            let reason = `HTTP ${res.status}`;
+            if (data) {
+                if (data.message) reason = data.message;
+                else if (data.detail) reason = (typeof data.detail === 'string') ? data.detail : JSON.stringify(data.detail);
+            }
+            showToast(`❌ 保存失败（${reason}）`, '#ef4444');
         }
     } catch (e) {
         showToast('❌ 网络错误', '#ef4444');

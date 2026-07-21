@@ -735,7 +735,11 @@ async def save_rule(rule: MockRule):
                             existing_rule = json.load(f)
                     except:
                         continue
-                        
+
+                    # 跳过非对象（如数组）或非规则类的 JSON 文件，避免解析报错导致保存失败
+                    if not isinstance(existing_rule, dict):
+                        continue
+
                     if existing_rule.get("method") != rule.method:
                         continue
                         
