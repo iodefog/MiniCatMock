@@ -367,6 +367,31 @@ const PROXY_EXCLUDED_HEADERS = new Set([
     'keep-alive', 'accept-encoding'
 ]);
 
+// ─── 神策(Sensors Data)埋点解密（客户端兜底）───
+// 即使服务端未重启、或抓到的是历史加密日志，也能在「请求详情」里明文展示。
+// 算法：data_list=URL安全的base64(gzip(json)) → base64解码 → gzip解压 → JSON。
+async function decodeSensorsBodyAsync(rawStr) {
+    if (!rawStr || typeof rawStr !== 'string' || !rawStr.includes('data_list=')) return null;
+    try {
+        const params = new URLSearchParams(rawStr);
+        const enc = params.get('data_list');
+        if (!enc) return null;
+        // URL-safe base64 → 标准 base64
+        const b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const ds = new DecompressionStream('gzip');
+        const stream = new Response(bytes).body.pipeThrough(ds);
+        const buf = await new Response(stream).arrayBuffer();
+        const text = new TextDecoder('utf-8').decode(buf);
+        JSON.parse(text); // 校验是否为合法 JSON
+        return text;
+    } catch (e) {
+        return null;
+    }
+}
+
 function buildCleanHeaders(rawHeaders) {
     const clean = {};
     for (const [key, value] of Object.entries(rawHeaders)) {
@@ -575,6 +600,8 @@ function setLogFilter(filterType, element) {
         element.classList.add('active');
     }
 
+    // 选择普通过滤器时，清除路径过滤的高亮标记
+    updatePathFilterIndicator();
     renderFilteredLogs();
 }
 
@@ -669,6 +696,7 @@ function renderFilteredLogs() {
     const container = document.getElementById('log-list');
     const badge = document.getElementById('log-badge');
     if (!container) return;
+    initLogLongPress(); // 绑定一次长按/右键浮层（幂等）
 
     const searchQuery = (document.getElementById('log-search-input')?.value || '').toLowerCase().trim();
     const filterType = window.currentLogFilter;
@@ -682,9 +710,26 @@ function renderFilteredLogs() {
         if (filterType === 'mocked' && !log.mock_matched) return false;
         if (filterType === 'missed' && log.mock_matched) return false;
         if (filterType === 'error' && !(log.status >= 400 || (log.status === 0 && !log.loading) || log.error || log.business_error)) return false;
+        // 路径过滤（由「过滤日志」浮层配置，如 /sa（神策）、/ioslog 等）：仅显示 path 以指定前缀开头的请求
+        if (typeof filterType === 'string' && filterType.startsWith('path:')) {
+            const prefix = filterType.slice(5);
+            if (prefix && !(log.path || '').startsWith(prefix)) return false;
+        }
 
         // 1.5 过滤根路径日志 (开启过滤日志时，隐藏 path 仅为 "/" 的请求)
         if (window.filterLogsEnabled && log.path === '/') return false;
+
+        // 1.6 已配置路径过滤（由「过滤日志」浮层配置的路径，如 /sa 神策埋点、/ioslog）：
+        //     过滤日志开启时，这些路径在主包列表中不再显示（按 path 前缀匹配）。
+        //     当前正在「仅查看」的聚焦路径除外，避免点了聚焦反而把自己藏起来。
+        if (window.filterLogsEnabled && Array.isArray(window.logPathFilters) && window.logPathFilters.length) {
+            const activePath = (typeof filterType === 'string' && filterType.startsWith('path:')) ? filterType.slice(5) : '';
+            const lp = log.path || '';
+            for (const f of window.logPathFilters) {
+                const p = f.path || '';
+                if (p && p !== activePath && lp.startsWith(p)) return false;
+            }
+        }
 
         // 2a. AI 语义搜索条件（结构化过滤，优先于普通子串匹配）
         if (aiActive) {
@@ -771,7 +816,7 @@ function renderFilteredLogs() {
         const finalQParamsStr = window.displayUrlInsteadOfPath ? '' : qParamsStr;
 
         itemsHtml += `
-                    <div class="log-item ${isActive}" onclick="selectLog(this, ${log.id})">
+                    <div class="log-item ${isActive}" data-log-id="${log.id}" onclick="selectLog(this, ${log.id})" oncontextmenu="onLogItemContext(event, ${log.id})">
                         <div class="log-meta">
                             <span class="method ${log.method}">${log.method}</span>
                             <div style="display:flex;align-items:center;gap:4px;">
@@ -819,5 +864,275 @@ async function clearLogs(e) {
         showToast('❌ 清空失败', '#ef4444');
     }
     clearingLogs = false;
+}
+
+// ─── 长按 / 右键日志项：弹出浮层，可配置或删除该 path 的路径映射 ───
+// 右键（桌面）直接触发；触摸端按住 500ms 触发（见 initLogLongPress）。
+function onLogItemContext(e, logId) {
+    e.preventDefault();
+    showLogPathMenu(logId, e.clientX, e.clientY);
+}
+
+function initLogLongPress() {
+    const list = document.getElementById('log-list');
+    if (!list || list.dataset.lpBound) return;
+    list.dataset.lpBound = '1';
+
+    // 触摸长按：按住 500ms 弹出浮层（鼠标端使用 contextmenu 事件）
+    let lpTimer = null;
+    list.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        const item = e.target.closest('.log-item');
+        if (!item) return;
+        const logId = Number(item.getAttribute('data-log-id'));
+        lpTimer = setTimeout(() => {
+            const rect = item.getBoundingClientRect();
+            showLogPathMenu(logId, rect.left + rect.width / 2, rect.top + 44);
+        }, 500);
+    });
+    const cancelLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+    list.addEventListener('pointermove', cancelLp);
+    list.addEventListener('pointerup', cancelLp);
+    list.addEventListener('pointercancel', cancelLp);
+}
+
+function showLogPathMenu(logId, x, y) {
+    const log = window.capturedLogsMap && window.capturedLogsMap[logId];
+    if (!log) return;
+    const path = log.path || '';
+    hideLogPathMenu();
+
+    const norm = (typeof normalizeMappingPath === 'function')
+        ? normalizeMappingPath
+        : (p) => { p = (p || '').trim(); if (!p.startsWith('/')) p = '/' + p; return p; };
+    const existingIdx = (typeof pathMappingsCache !== 'undefined')
+        ? pathMappingsCache.findIndex(m => norm(m.path) === norm(path)) : -1;
+
+    const menu = document.createElement('div');
+    menu.id = 'log-path-menu';
+    menu.className = 'float-menu';
+    menu.innerHTML = `
+        <div class="float-menu-title">${escapeHtml(path || '/')}</div>
+        <button class="float-menu-item" onclick="configurePathFromLog('${escapeHtml(path)}')">⚙ 配置路径映射</button>
+        <button class="float-menu-item ${existingIdx >= 0 ? '' : 'disabled'}" ${existingIdx >= 0 ? '' : 'disabled'} onclick="deletePathFromLog('${escapeHtml(path)}')">🗑 删除路径映射</button>
+        <button class="float-menu-item cancel" onclick="hideLogPathMenu()">取消</button>
+    `;
+    document.body.appendChild(menu);
+
+    // 视口内定位，避免溢出
+    const mw = 230;
+    const mh = menu.offsetHeight || 130;
+    let left = Math.min(x, window.innerWidth - mw - 8);
+    let top = Math.min(y, window.innerHeight - mh - 8);
+    menu.style.left = Math.max(8, left) + 'px';
+    menu.style.top = Math.max(8, top) + 'px';
+
+    setTimeout(() => document.addEventListener('click', _onDocClickLogMenu), 0);
+}
+
+function _onDocClickLogMenu(e) {
+    const m = document.getElementById('log-path-menu');
+    if (m && !m.contains(e.target)) hideLogPathMenu();
+}
+
+function hideLogPathMenu() {
+    const m = document.getElementById('log-path-menu');
+    if (m) m.remove();
+    document.removeEventListener('click', _onDocClickLogMenu);
+}
+
+// 从日志项配置路径映射：已存在同 path 映射则编辑，否则预填 path 新增
+function configurePathFromLog(path) {
+    hideLogPathMenu();
+    const norm = (typeof normalizeMappingPath === 'function')
+        ? normalizeMappingPath
+        : (p) => { p = (p || '').trim(); if (!p.startsWith('/')) p = '/' + p; return p; };
+    const idx = (typeof pathMappingsCache !== 'undefined')
+        ? pathMappingsCache.findIndex(m => norm(m.path) === norm(path)) : -1;
+    if (idx >= 0) {
+        openPathMappingEditor(idx);
+    } else {
+        openPathMappingEditor({ path: path || '', target_url: '', method: 'ANY', enabled: true, force_response: '' });
+    }
+    // 跳转到「连接设置」tab 的「路径映射」区块，便于查看/管理
+    if (typeof openPathMappingManager === 'function') openPathMappingManager();
+}
+
+// 从日志项删除该 path 已存在的路径映射
+function deletePathFromLog(path) {
+    const norm = (typeof normalizeMappingPath === 'function')
+        ? normalizeMappingPath
+        : (p) => { p = (p || '').trim(); if (!p.startsWith('/')) p = '/' + p; return p; };
+    const idx = (typeof pathMappingsCache !== 'undefined')
+        ? pathMappingsCache.findIndex(m => norm(m.path) === norm(path)) : -1;
+    hideLogPathMenu();
+    if (idx < 0) {
+        showToast('该路径暂无映射可删除', '#f59e0b');
+        return;
+    }
+    if (!confirm(`确认删除映射：\n${pathMappingsCache[idx].path} ➜ ${pathMappingsCache[idx].target_url}`)) return;
+    pathMappingsCache.splice(idx, 1);
+    savePathMappings().then(() => { if (typeof renderPathMappings === 'function') renderPathMappings(); });
+    showToast('✅ 已删除路径映射');
+}
+
+// ─────────────────────────────────────────────────────────────
+// 「过滤日志」按钮：路径过滤管理
+//   · 单击        → 切换过滤根路径「/」请求（原有行为）
+//   · 双击 / 长按 → 弹出管理浮层，可增删并选择要单独查看的 path
+//     预置：/sa（神策，神策就是 /sa）、/ioslog；也可新增其他 path
+// ─────────────────────────────────────────────────────────────
+const LOG_PATH_FILTERS_KEY = 'mock_log_path_filters';
+
+function loadLogPathFilters() {
+    try {
+        const raw = localStorage.getItem(LOG_PATH_FILTERS_KEY);
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) return arr;
+        }
+    } catch (e) { }
+    // 默认预置：神策(/sa) 与 /ioslog
+    return [
+        { path: '/sa', label: '神策' },
+        { path: '/ioslog', label: '' }
+    ];
+}
+
+function saveLogPathFilters(list) {
+    window.logPathFilters = list;
+    try { localStorage.setItem(LOG_PATH_FILTERS_KEY, JSON.stringify(list)); } catch (e) { }
+}
+
+if (!window.logPathFilters) window.logPathFilters = loadLogPathFilters();
+
+// 单击/双击区分：单击延迟触发根路径过滤，若紧接双击则取消；双击打开管理浮层
+let _filterToggleClickTimer = null;
+function onFilterToggleClick() {
+    if (_filterToggleClickTimer) { clearTimeout(_filterToggleClickTimer); _filterToggleClickTimer = null; }
+    _filterToggleClickTimer = setTimeout(() => {
+        _filterToggleClickTimer = null;
+        toggleLogFilter();
+    }, 230);
+}
+
+// 打开路径过滤管理浮层
+function openLogFilterManager() {
+    if (_filterToggleClickTimer) { clearTimeout(_filterToggleClickTimer); _filterToggleClickTimer = null; }
+    if (document.getElementById('log-filter-manager-mask')) return;
+
+    const mask = document.createElement('div');
+    mask.className = 'tmodal-mask';
+    mask.id = 'log-filter-manager-mask';
+    mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'tmodal';
+    modal.innerHTML = `
+        <h3>日志路径过滤</h3>
+        <div class="pm-editor-hint" style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+            点击某个路径，仅查看该接口的请求（按 path 前缀匹配）。<br>
+            可新增自定义 path（如 <code>/sa</code>、<code>/ioslog</code>），神策埋点即为 <code>/sa</code>。<br>
+            过滤日志开启后，列表中的路径不再显示在主包列表里。
+        </div>
+        <div class="lpf-list" id="lpf-list"></div>
+        <div class="lpf-add-row">
+            <input id="lpf-new-path" placeholder="/ioslog" onkeydown="if(event.key==='Enter'){addLogPathFilterFromInput();}">
+            <button class="lpf-add-btn" onclick="addLogPathFilterFromInput()">＋ 新增</button>
+        </div>
+        <div class="tmodal-actions">
+            <button onclick="clearLogPathFilter()">显示全部</button>
+            <button class="tmodal-save" onclick="this.closest('.tmodal-mask').remove()">完成</button>
+        </div>`;
+    mask.appendChild(modal);
+    document.body.appendChild(mask);
+    renderLogPathFilterList();
+}
+
+function renderLogPathFilterList() {
+    const list = document.getElementById('lpf-list');
+    if (!list) return;
+    const active = (typeof window.currentLogFilter === 'string' && window.currentLogFilter.startsWith('path:'))
+        ? window.currentLogFilter.slice(5) : '';
+    if (!window.logPathFilters.length) {
+        list.innerHTML = '<div class="pm-empty" style="font-size: 12px; color: var(--text-muted); padding: 12px; text-align: center; border: 1px dashed var(--border); border-radius: 8px;">暂无路径过滤，下方输入 path 新增</div>';
+        return;
+    }
+    list.innerHTML = window.logPathFilters.map((f, idx) => {
+        const isActive = f.path === active;
+        return `
+        <div class="lpf-item ${isActive ? 'active' : ''}">
+            <button class="lpf-apply" onclick="applyLogPathFilter('${escapeHtml(f.path)}')">
+                <span class="lpf-path">${escapeHtml(f.path)}</span>
+                ${f.label ? `<span class="lpf-label">${escapeHtml(f.label)}</span>` : ''}
+                ${isActive ? '<span class="lpf-check">✓</span>' : ''}
+            </button>
+            <button class="lpf-del" title="删除该路径" onclick="deleteLogPathFilter(${idx})">🗑</button>
+        </div>`;
+    }).join('');
+}
+
+function addLogPathFilterFromInput() {
+    const input = document.getElementById('lpf-new-path');
+    if (!input) return;
+    let p = (input.value || '').trim();
+    if (!p) return;
+    if (!p.startsWith('/')) p = '/' + p;
+    if (window.logPathFilters.some(f => f.path === p)) {
+        showToast('该路径已存在', '#f59e0b');
+        return;
+    }
+    window.logPathFilters.push({ path: p, label: '' });
+    saveLogPathFilters(window.logPathFilters);
+    input.value = '';
+    renderLogPathFilterList();
+}
+
+function deleteLogPathFilter(idx) {
+    const f = window.logPathFilters[idx];
+    if (!f) return;
+    const wasActive = (typeof window.currentLogFilter === 'string') && window.currentLogFilter === 'path:' + f.path;
+    window.logPathFilters.splice(idx, 1);
+    saveLogPathFilters(window.logPathFilters);
+    if (wasActive) {
+        window.currentLogFilter = 'all';
+        updatePathFilterIndicator();
+        renderFilteredLogs();
+    }
+    renderLogPathFilterList();
+}
+
+function applyLogPathFilter(path) {
+    window.currentLogFilter = 'path:' + path;
+    // 清除普通过滤按钮的高亮（路径过滤与普通过滤互斥）
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    updatePathFilterIndicator();
+    renderFilteredLogs();
+    const mask = document.getElementById('log-filter-manager-mask');
+    if (mask) mask.remove();
+}
+
+function clearLogPathFilter() {
+    window.currentLogFilter = 'all';
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    const allBtn = document.querySelector('.filter-btn[onclick*="\'all\'"]');
+    if (allBtn) allBtn.classList.add('active');
+    updatePathFilterIndicator();
+    renderFilteredLogs();
+    const mask = document.getElementById('log-filter-manager-mask');
+    if (mask) mask.remove();
+}
+
+// 在「过滤日志」按钮上显示当前生效的路径过滤标记
+function updatePathFilterIndicator() {
+    const tag = document.getElementById('path-filter-tag');
+    const btn = document.getElementById('filter-logs-toggle');
+    const f = window.currentLogFilter || '';
+    const isPath = typeof f === 'string' && f.startsWith('path:');
+    if (tag) {
+        if (isPath) { tag.textContent = f.slice(5); tag.style.display = ''; }
+        else { tag.textContent = ''; tag.style.display = 'none'; }
+    }
+    if (btn) btn.classList.toggle('pf-active', isPath);
 }
 

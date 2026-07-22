@@ -612,7 +612,7 @@ function buildReferenceText(log) {
 }
 
 // ─── 快捷指令提示词（AI 实验室 与 AI Mock 助手 共用，保证功能与 UI 对齐）───
-// 点击快捷指令芯片时，把对应的「完善提示语」填入目标输入框，不自动执行，由用户确认后再生成。
+// 点击快捷指令标签时，把对应的「完善提示语」填入目标输入框，不自动执行，由用户确认后再生成。
 const QUICK_ACTION_PROMPTS = {
     generate: {
         zh: '请为当前接口一键生成一个完整、真实可信的 Mock 数据集：包含 id、名称、头像 URL、状态、创建时间等常见字段，以数组形式返回 10 条，外层统一包裹为 {"code": 200, "message": "success", "data": {"list": [...], "total": 10, "page": 1}}。',
@@ -655,7 +655,7 @@ const QUICK_ACTION_PROMPTS = {
         zh: '请参考指定接口或某段描述字段，自动生成一组相关/互补的接口（如配套的列表、详情、创建、更新、删除接口），保证字段命名、状态码与响应结构风格一致，并给出每个接口的请求方式与示例响应 JSON。',
         en: 'Based on a reference endpoint or a description field, auto-generate a set of related/complementary endpoints (e.g. paired list, detail, create, update, delete), keeping field naming, status codes and response structure style consistent, and provide each endpoint method with example response JSON.'
     },
-    // ── 重新请求（🔁）：点击芯片仅把提示语填入输入框，真正发请求由发送按钮触发 ──
+    // ── 重新请求（🔁）：点击标签仅把提示语填入输入框，真正发请求由发送按钮触发 ──
     replay: {
         zh: '请通过 curl 重新请求当前接口（自动带上原始请求方法、URL、Header 与 Body），把真实线上响应完整回显给我，用于核对与抓包数据是否一致。',
         en: 'Re-request the current endpoint via curl (auto-including the original method, URL, headers and body), and show me the complete real live response, so I can verify it against the captured data.'
@@ -767,8 +767,8 @@ function isQuestionLike(text) {
     return /哪个|哪些|哪里|哪几|哪一个|哪几个|什么|怎么|如何|是否|在哪|查询|查找|搜索|搜一下|搜|定位|属于|存在|属于哪个|在哪|在哪个|区别|为什么|为什么|解释/i.test(text);
 }
 
-// 判断是否为「重新请求接口」意图（点击 🔁 芯片填入的提示语，或用户手动输入）。
-// 命中后由发送按钮真正发起 curl 请求，而不是点击芯片时直接发请求。
+// 判断是否为「重新请求接口」意图（点击 🔁 标签填入的提示语，或用户手动输入）。
+// 命中后由发送按钮真正发起 curl 请求，而不是点击标签时直接发请求。
 function isReplayLike(text) {
     if (!text) return false;
     return /重新请求|重新调用|重发|重放|re-?request|replay|curl/i.test(text);
@@ -882,7 +882,7 @@ async function simulateAIRuleGen() {
         return;
     }
 
-    // 重新请求意图（点击 🔁 芯片填入的提示语）→ 真正发起 curl，不依赖 API Key
+    // 重新请求意图（点击 🔁 标签填入的提示语）→ 真正发起 curl，不依赖 API Key
     if (isReplayLike(instruction)) {
         await replayInterfaceViaCurl('ai-nl-path', 'ai-nl-output', 'ai-nl-output-status');
         return;
@@ -1012,7 +1012,7 @@ async function runGlobalAIGenerate() {
         return;
     }
 
-    // 重新请求意图（点击 🔁 芯片填入的提示语）→ 真正发起 curl，不依赖 API Key
+    // 重新请求意图（点击 🔁 标签填入的提示语）→ 真正发起 curl，不依赖 API Key
     if (isReplayLike(prompt)) {
         await replayInterfaceViaCurl('global-ai-path', 'global-ai-stream-preview', 'global-ai-gen-status');
         return;

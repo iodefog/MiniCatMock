@@ -9,6 +9,7 @@
                         <span class="subtab active" onclick="switchSubTab('dashboard')">Dashboard</span>
                         <span class="subtab" onclick="switchSubTab('logs')">Logs</span>
                         <span class="subtab" onclick="switchSubTab('analytics')">Analytics</span>
+                        <span class="subtab" onclick="switchSubTab('tracking')">Tracking</span>
                     </div>
                     <div class="middle-actions">
                         <button class="btn-refresh" onclick="loadLogs()" title="Refresh" data-i18n-title="refresh_btn"
@@ -30,6 +31,13 @@
                         <button class="filter-btn" onclick="setLogFilter('POST', this)">POST</button>
                         <button class="filter-btn" onclick="setLogFilter('mocked', this)">MOCK</button>
                         <button class="filter-btn" onclick="setLogFilter('missed', this)">MISSED</button>
+                        <div class="filter-toggle-wrap">
+                            <button class="filter-toggle-btn active" id="filter-logs-toggle" onclick="onFilterToggleClick()" ondblclick="openLogFilterManager()" title="Click: hide root '/' requests; Double-click: manage path filters (/sa, /ioslog, ...)">
+                                <span class="filter-toggle-dot"></span>
+                                <span class="filter-toggle-label">Filter</span>
+                                <span class="path-filter-tag" id="path-filter-tag" style="display:none;"></span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -575,170 +583,183 @@
 
                 <!-- Tab 3: Device Connections & Settings Guide -->
                 <div id="connect-tab" class="tab-content scroll-container">
-                    <div style="max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+                    <div class="settings-page" style="max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px;">
 
-                        <div class="settings-header-card">
-                            <div class="settings-info-block">
-                                <div class="settings-icon-box">🔧</div>
-                                <div class="settings-text-box">
-                                    <h3>AI & Mock Control Center</h3>
-                                    <p>Configure AI providers, data encryption, and LAN multi-device connections.</p>
+                        <!-- ─── Section 1: Service Control Center ─── -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: rgba(99,102,241,0.1); color: var(--purple);">⚙️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">AI & Mock Control Center</h3>
+                                    <p class="settings-card-desc">Configure AI model providers, data encryption, and LAN multi-device connections.</p>
                                 </div>
                             </div>
-                            <div class="settings-actions-block">
-                                <button class="btn-purple" id="btn-open-ai-settings" onclick="openAISettings()"
-                                    style="padding: 10px 18px;">
-                                    <span>⚙️ Configure AI</span>
-                                    <span id="ai-key-status-badge" class="ai-key-status notset"
-                                        style="margin-left: 4px;">Not Set</span>
+                            <div class="settings-card-body" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                <button class="btn-purple" id="btn-open-ai-settings" onclick="openAISettings()">
+                                    <span>⚙️</span>
+                                    <span>Configure AI</span>
+                                    <span id="ai-key-status-badge" class="ai-key-status notset">Not Set</span>
                                 </button>
-                                <button class="btn-secondary" onclick="toggleTheme()" style="padding: 10px 18px;" data-i18n="btn_toggle_theme">
-                                    🌓 Toggle Dark/Light Theme
+                                <button class="btn-settings-action" onclick="toggleTheme()" title="Toggle dark/light theme">
+                                    <span>🌓</span>
+                                    <span>Toggle Theme</span>
                                 </button>
-                                <button class="btn-secondary" onclick="toggleLanguage()" style="padding: 10px 18px;">
-                                    🌍 <span>Switch Language (EN/中)</span>
+                                <button class="btn-settings-action" onclick="toggleLanguage()" title="Switch language">
+                                    <span>🌍</span>
+                                    <span>EN/中</span>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Scan Connect Area -->
-                        <div style="text-align: center; margin-bottom: 8px;">
-                            <h2 style="font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 8px;">
-                                Scan to Connect Mobile Device</h2>
-                            <p style="color: var(--text-muted); font-size: 13px;">No manual proxy settings required. One-click tunnel for network capturing and Mocking</p>
-                        </div>
-
-                        <!-- Connection Method Selection -->
-                        <div class="connection-mode-selector">
-                            <label class="mode-card active" id="mode-lan-label">
-                                <input type="radio" name="connection-mode" value="lan" checked onchange="onConnectionModeChange('lan')" class="mode-radio">
-                                <div class="mode-header">
-                                    <div class="mode-icon-wrapper">📶</div>
-                                    <span class="mode-title">LAN Connection (LAN)</span>
-                                    <span class="recommend-badge">Recommended</span>
+                        <!-- ─── Section 2: Device Connection ─── -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: rgba(16,185,129,0.1); color: var(--green);">📱</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">Scan to Connect Mobile Device</h3>
+                                    <p class="settings-card-desc">No manual proxy settings required. One-click tunnel for network capturing and Mocking</p>
                                 </div>
-                                <span class="mode-desc">Phone and PC on the same Wi-Fi. Data is routed directly through the local network. Highly secure and fast.</span>
-                                <div class="mode-check-badge"></div>
-                            </label>
-                            
-                            <label class="mode-card" id="mode-tunnel-label">
-                                <input type="radio" name="connection-mode" value="tunnel" onchange="onConnectionModeChange('tunnel')" class="mode-radio">
-                                <div class="mode-header">
-                                    <div class="mode-icon-wrapper">🌐</div>
-                                    <span class="mode-title">Cross-Network (Tunnel)</span>
+                            </div>
+                            <div class="settings-card-body" style="display: flex; flex-direction: column; gap: 20px;">
+
+                                <!-- Connection Method Selection -->
+                                <div class="connection-mode-selector" style="margin: 0;">
+                                    <label class="mode-card active" id="mode-lan-label">
+                                        <input type="radio" name="connection-mode" value="lan" checked onchange="onConnectionModeChange('lan')" class="mode-radio">
+                                        <div class="mode-header">
+                                            <div class="mode-icon-wrapper">📶</div>
+                                            <span class="mode-title">LAN Connection</span>
+                                            <span class="recommend-badge">Recommended</span>
+                                        </div>
+                                        <span class="mode-desc">Phone and PC on the same Wi-Fi. Data is routed directly through the local network. Highly secure and fast.</span>
+                                        <div class="mode-check-badge"></div>
+                                    </label>
+                                    <label class="mode-card" id="mode-tunnel-label">
+                                        <input type="radio" name="connection-mode" value="tunnel" onchange="onConnectionModeChange('tunnel')" class="mode-radio">
+                                        <div class="mode-header">
+                                            <div class="mode-icon-wrapper">🌐</div>
+                                            <span class="mode-title">Cross-Network (Tunnel)</span>
+                                        </div>
+                                        <span class="mode-desc">Uses a secure public tunnel. Suitable for 4G/5G, cross-network segment, or isolated public Wi-Fi.</span>
+                                        <div class="mode-check-badge"></div>
+                                    </label>
                                 </div>
-                                <span class="mode-desc">Uses a secure public tunnel. Suitable for 4G/5G, cross-network segment, or isolated public Wi-Fi.</span>
-                                <div class="mode-check-badge"></div>
-                            </label>
-                        </div>
 
-                        <!-- Tunnel Status Container -->
-                        <div id="tunnel-status-container" style="display: none; text-align: center; margin-top: -12px; margin-bottom: 12px;">
-                            <span id="tunnel-status-badge" style="padding: 6px 12px; border-radius: var(--radius-md); font-size: 12px; font-weight: 600; background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border);">
-                                ⏳ Initializing tunnel...
-                            </span>
-                            <span id="tunnel-url-copy-btn" style="display: inline-block; margin-left: 12px; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500; display: none;" onclick="copyTunnelUrl()">📋 Copy Tunnel Link</span>
-                        </div>
-
-                        <!-- Security Assessment & Warning Card -->
-                        <div id="tunnel-security-warning" class="premium-warning-card" style="display: none;">
-                            <div class="premium-warning-title">
-                                <span>🔒 Security Assessment & Warning for Localtunnel</span>
-                            </div>
-                            <div class="premium-warning-content">
-                                1. <strong>Public Exposure Risk</strong>: Once enabled, the local mock server will be exposed to the public internet via a temporary subdomain. Anyone with this URL can access the mock endpoints. <strong>Do NOT include sensitive or proprietary information in your mock rules</strong>.<br>
-                                2. <strong>On-Demand Use</strong>: We strongly advise enabling this mode only when testing over cellular or external networks. <strong>Turn it off (switch back to LAN mode) immediately</strong> after debugging to close the public tunnel.<br>
-                                3. <strong>Encrypted Transmission</strong>: Localtunnel provides HTTPS URLs to secure transit, but caution is advised when using third-party public proxies.
-                            </div>
-                        </div>
-
-                        <div id="win-firewall-warning"
-                            style="display: none; background: var(--orange-light); border: 1px solid var(--orange); border-radius: var(--radius-md); padding: 16px;">
-                            <h4 style="margin: 0 0 8px 0; color: var(--orange); font-size: 14px; font-weight: 700;">⚠️
-                                Windows Firewall & Network Configuration Tips</h4>
-                            <p style="margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6;">
-                                若手机扫码后<strong>无法建立连接</strong>，请排查 Windows Defender
-                                防火墙：允许「python.exe」或「小猫 Mock.exe」在<strong>公用和专用网络</strong>中传入连接；若在 Parallels 等虚拟机中运行
-                                Windows，需将虚拟机网络设置为<strong>桥接模式 (Bridged)</strong>。
-                            </p>
-                        </div>
-
-                        <div
-                            style="display: flex; flex-wrap: wrap; gap: 30px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 30px; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);">
-                            <div
-                                style="flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--surface2); padding: 20px; border-radius: var(--radius-lg); width: 200px; border: 1px solid var(--border);">
-                                <div id="qrcode-loading"
-                                    style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">⏳ Retrieving local IP...
+                                <!-- Tunnel Status -->
+                                <div id="tunnel-status-container" style="display: none; text-align: center;">
+                                    <span id="tunnel-status-badge" class="tunnel-status-badge-inline">⏳ Initializing tunnel...</span>
+                                    <span id="tunnel-url-copy-btn" style="display: none; margin-left: 12px; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="copyTunnelUrl()">📋 Copy Tunnel Link</span>
                                 </div>
-                                <div id="qrcode" style="display: none;"></div>
-                                <div class="mock-url-text" id="mock-url-text">Loading...</div>
-                            </div>
 
-                            <div style="flex: 1; min-width: 280px;">
-                                <ul class="guide-steps" style="margin: 0; padding: 0; list-style: none;">
-                                    <li style="margin-bottom: 20px; display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">1</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">Connect to same
-                                                Wi-Fi Local Network</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">Ensure your test phone and the Mac/PC
-                                                Mac/PC 电脑处在<strong>同一个局域网</strong>环境中。</span>
+                                <!-- Tunnel Security Warning -->
+                                <div id="tunnel-security-warning" class="settings-warning-card" style="display: none;">
+                                    <span class="settings-warning-icon">🔒</span>
+                                    <div class="settings-warning-body">
+                                        <strong>Security Assessment & Warning</strong>
+                                        <ol style="margin: 8px 0 0 16px; font-size: 12px; line-height: 1.6; color: var(--text-muted);">
+                                            <li><strong>Public Exposure Risk</strong>: The mock server will be exposed to the public internet. <strong>Do NOT include sensitive data in mock rules</strong>.</li>
+                                            <li><strong>On-Demand Use</strong>: <strong>Switch back to LAN mode immediately</strong> after debugging to close the public tunnel.</li>
+                                            <li><strong>Encrypted Transmission</strong>: HTTPS is used for transit, but caution is advised with third-party proxies.</li>
+                                        </ol>
+                                    </div>
+                                </div>
+
+                                <!-- Windows Firewall Warning -->
+                                <div id="win-firewall-warning" class="settings-warning-card" style="display: none; border-left-color: var(--orange); background: rgba(245,158,11,0.04);">
+                                    <span class="settings-warning-icon">🪟</span>
+                                    <div class="settings-warning-body">
+                                        <strong>Windows Firewall & Network Configuration Tips</strong>
+                                        <p style="margin: 6px 0 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+                                            If the phone cannot connect after scanning the QR code, please check Windows Defender Firewall: allow "python.exe" or "Cat Mock.exe" for incoming connections on <strong>both public and private networks</strong>. If running Windows in a VM (e.g., Parallels), set the VM network to <strong>Bridged mode</strong>.</p>
+                                    </div>
+                                </div>
+
+                                <!-- QR Code + Guide Steps -->
+                                <div class="settings-connect-row">
+                                    <div class="settings-qr-card">
+                                        <div class="settings-qr-inner">
+                                            <div id="qrcode-loading" class="settings-qr-loading">⏳ Retrieving local IP...</div>
+                                            <div id="qrcode" style="display: none;"></div>
+                                            <div class="mock-url-text" id="mock-url-text">Loading...</div>
                                         </div>
-                                    </li>
-                                    <li style="margin-bottom: 20px; display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">2</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">App
-                                                Scan to Connect</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">Open the built-in Debug Panel
-                                                Debug 调试面板，点击<strong>「Scan to Connect」</strong>扫描左侧二维码。</span>
+                                    </div>
+                                    <div class="settings-guide-steps">
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">1</span>
+                                            <div class="settings-step-content">
+                                                <strong>Connect to same Wi-Fi</strong>
+                                                <span>Ensure your test phone and the Mac/PC are on the <strong>same local network</strong>.</span>
+                                            </div>
                                         </div>
-                                    </li>
-                                    <li style="display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">3</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">Enable
-                                                Mock Proxying</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">Once connected, toggle
-                                                内开启<strong>「Enable Mock 转发」</strong>开关，所有客户端发出的请求即可在左侧列表实时捕获推送！</span>
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">2</span>
+                                            <div class="settings-step-content">
+                                                <strong>App Scan to Connect</strong>
+                                                <span>Open the built-in Debug Panel in the app and tap <strong>"Scan to Connect"</strong> to scan the QR code.</span>
+                                            </div>
                                         </div>
-                                    </li>
-                                </ul>
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">3</span>
+                                            <div class="settings-step-content">
+                                                <strong>Enable Mock Proxying</strong>
+                                                <span>Once connected, toggle <strong>"Enable Mock Forwarding"</strong> in the app to start capturing all client requests in real time!</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Troubleshoot Guide -->
-                        <div
-                            style="background: var(--red-light); border-left: 4px solid var(--red); border-radius: var(--radius-md); padding: 20px;">
-                            <h4 style="margin: 0 0 10px 0; color: var(--red); font-size: 14px; font-weight: 700;">⚠️ Can't Connect
-                                / Network timeout? Troubleshooting guide:</h4>
-                            <div
-                                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 10px;">
-                                <div
-                                    style="background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                                    <strong
-                                        style="color: var(--text); font-size: 12px; display: block; margin-bottom: 4px;">🔒
-                                        System Firewall Blocks</strong>
-                                    <p style="margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
-                                        <strong>Mac</strong>: 系统设置 ➔ 网络 ➔ 防火墙 ➔ 选项，确保 Python/Mock 服务允许传入连接。<br>
-                                        <strong>Win</strong>: 需在弹窗时勾选专用和公用网络允许传入。
+                        <!-- ─── Section 3: Path Mapping (Collapsible) ─── -->
+                        <details class="settings-card settings-collapsible" id="pm-collapsible" open>
+                            <summary class="settings-card-header settings-summary-header">
+                                <div class="settings-card-icon" style="background: rgba(245,158,11,0.1); color: var(--orange);">🗺️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">Path Mapping Forwarding</h3>
+                                    <p class="settings-card-desc">Auto-forward /mock/{path} requests to the real target URL</p>
+                                </div>
+                                <span class="settings-collapse-arrow">▾</span>
+                            </summary>
+                            <div class="settings-card-body" style="border-top: 1px solid var(--border); padding-top: 16px;">
+                                <div class="pm-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                                    <p class="pm-desc" style="color: var(--text-muted); font-size: 12px; margin: 0; line-height: 1.5; flex: 1;">
+                                        When the app cannot modify headers due to SDK limitations, real requests are rewritten to <code>/mock/{path}?...</code>. Configure mappings to forward matched <code>/mock/sa</code> to the real target (e.g., <code>https://sc-sa.dramaboxdb.com/sa</code>), with original query parameters automatically appended.
                                     </p>
+                                    <button class="btn-purple" onclick="openPathMappingEditor(-1)" style="flex-shrink: 0; margin-left: 16px; padding: 6px 14px; font-size: 12px;">＋ Add Mapping</button>
                                 </div>
-                                <div
-                                    style="background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                                    <strong
-                                        style="color: var(--text); font-size: 12px; display: block; margin-bottom: 4px;">🚫
-                                        AP Isolation & VPN Conflicts</strong>
-                                    <p style="margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
-                                        <strong>网络隔离</strong>: 咖啡厅等公共 Wi-Fi 会隔离设备通信。<strong>终极解法：手机开热点给电脑连！</strong><br>
-                                        <strong>代理冲突</strong>: 手机需Close Clash、Shadowrocket 等可能接管流量的代理软件。
-                                    </p>
+                                <div id="path-mapping-list" class="pm-list"></div>
+                            </div>
+                        </details>
+
+                        <!-- ─── Section 4: Troubleshooting Guide (Collapsible, default collapsed) ─── -->
+                        <details class="settings-card settings-collapsible settings-card-warn" id="troubleshoot-collapsible">
+                            <summary class="settings-card-header settings-summary-header">
+                                <div class="settings-card-icon" style="background: rgba(239,68,68,0.1); color: var(--red);">⚠️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">Troubleshooting Guide</h3>
+                                    <p class="settings-card-desc">Can't connect or requests keep timing out? Check common issues and solutions</p>
+                                </div>
+                                <span class="settings-collapse-arrow">▾</span>
+                            </summary>
+                            <div class="settings-card-body" style="border-top: 1px solid var(--border); padding-top: 16px;">
+                                <div class="settings-troubleshoot-grid">
+                                    <div class="settings-troubleshoot-item">
+                                        <span class="settings-troubleshoot-icon">🔒</span>
+                                        <div>
+                                            <strong>System Firewall Blocks</strong>
+                                            <p><strong>Mac</strong>: System Settings → Network → Firewall → Options, ensure Python/Mock service allows incoming connections.<br><strong>Win</strong>: Check both public and private network options in the firewall popup.</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-troubleshoot-item">
+                                        <span class="settings-troubleshoot-icon">🚫</span>
+                                        <div>
+                                            <strong>AP Isolation & VPN Conflicts</strong>
+                                            <p><strong>Network Isolation</strong>: Public Wi-Fi (e.g., cafes) often isolates device communication. <strong>Solution: Use phone hotspot for PC!</strong><br><strong>Proxy Conflicts</strong>: Close Clash, Shadowrocket, or other proxy apps on the phone.</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        </details>
 
                     </div>
                 </div>

@@ -43,7 +43,14 @@ function selectLog(element, logId) {
     // 渲染详情 (支持 Collapsible JSON Viewer!)
     tryRenderJsonView('inspect-req-headers', log.headers || {});
     tryRenderJsonView('inspect-query', log.query_params || {});
-    tryRenderJsonView('inspect-body', log.body || {});
+    // 神策埋点：若请求体仍是加密 form(data_list=)，客户端兜底解密后再展示明文
+    if (typeof log.body === 'string' && log.body.includes('data_list=')) {
+        decodeSensorsBodyAsync(log.body).then(decoded => {
+            tryRenderJsonView('inspect-body', decoded ? JSON.parse(decoded) : log.body);
+        });
+    } else {
+        tryRenderJsonView('inspect-body', log.body || {});
+    }
 
     // 渲染响应信息
     const respStatusBadge = document.getElementById('response-status-badge');

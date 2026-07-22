@@ -6,6 +6,7 @@ for env_key in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_P
 import sys
 import json
 import time
+import datetime
 import socket
 import subprocess
 import shutil
@@ -15,6 +16,9 @@ import httpx
 import asyncio
 import lz4.block
 import uuid
+import base64
+import gzip
+import urllib.parse
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -32,6 +36,8 @@ JS_PLACEHOLDERS = [
     ("/* {{MOCK_PLACEHOLDER}} */", "js/mock.js"),
     ("/* {{AI_PLACEHOLDER}} */", "js/ai.js"),
     ("/* {{PET_PLACEHOLDER}} */", "js/pet.js"),
+    ("/* {{TRACKING_PLACEHOLDER}} */", "js/tracking.js"),
+    ("/* {{PATH_MAPPING_PLACEHOLDER}} */", "js/path-mapping.js"),
 ]
 
 # 前端 HTML 骨架已按区块拆分为多个 partial 文件，运行时按此顺序注入模板占位符。
@@ -76,6 +82,418 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 CAPTURED_DATA_PATH = os.path.join(DATA_DIR, "captured_requests.json")
 MAX_CAPTURED_REQUESTS = 500  # 增大内存中抓包记录上限
+
+# ─── 埋点校验（Tracking Validation）子系统持久化与状态 ───
+TRACKING_RULES_PATH = os.path.join(DATA_DIR, "tracking_rules.json")
+TRACKING_CONFIG_PATH = os.path.join(DATA_DIR, "tracking_config.json")
+TRACKING_ARCHIVES_PATH = os.path.join(DATA_DIR, "tracking_archives.json")
+
+# 进程内聚合命中状态（录制会话级，重启即清空，不落盘）
+tracking_hits = {}
+tracking_recording = False
+# 归档列表（持久化到磁盘）
+tracking_archives = []
+
+def load_tracking_archives():
+    """加载已归档的校验结果列表。"""
+    global tracking_archives
+    if os.path.exists(TRACKING_ARCHIVES_PATH):
+        try:
+            with open(TRACKING_ARCHIVES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    tracking_archives = data
+        except Exception:
+            pass
+
+def save_tracking_archives():
+    try:
+        with open(TRACKING_ARCHIVES_PATH, "w", encoding="utf-8") as f:
+            json.dump(tracking_archives, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def load_tracking_rules():
+    """加载埋点清单（规则数组）。不存在时返回预置示例（3 条投屏埋点）。"""
+    if os.path.exists(TRACKING_RULES_PATH):
+        try:
+            with open(TRACKING_RULES_PATH, "r", encoding="utf-8") as f:
+                rules = json.load(f)
+                if isinstance(rules, list):
+                    return rules
+        except Exception:
+            pass
+    # 预置示例（注意真实上报字段为 buttton_name，三 t）
+    return [
+        {"id": "rule_cast_show", "event": "buttonShow", "scenario": "投屏按钮曝光",
+         "params": [{"name": "buttton_name", "required": True, "value": "cast", "type": "string"}]},
+        {"id": "rule_cast_click", "event": "buttonClick", "scenario": "投屏按钮点击",
+         "params": [{"name": "buttton_name", "required": True, "value": "cast", "type": "string"}]},
+        {"id": "rule_cast_device", "event": "buttonClick", "scenario": "投屏设备点击",
+         "params": [
+             {"name": "buttton_name", "required": True, "value": "cast", "type": "string"},
+             {"name": "device_name", "required": True, "value": "", "type": "string"},
+             {"name": "is_success", "required": True, "value": "", "type": "bool"},
+         ]},
+    ]
+
+def save_tracking_rules(rules):
+    try:
+        with open(TRACKING_RULES_PATH, "w", encoding="utf-8") as f:
+            json.dump(rules, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def load_tracking_config():
+    """加载来源接口配置。
+    默认留空（sources=[]）：录制时捕获所有 JSON 请求，最省心。
+    若配置了关键字，则仅对 URL 包含该关键字的请求做埋点校验。"""
+    if os.path.exists(TRACKING_CONFIG_PATH):
+        try:
+            with open(TRACKING_CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                if isinstance(cfg, dict) and isinstance(cfg.get("sources"), list):
+                    return cfg
+        except Exception:
+            pass
+    return {"sources": []}
+
+def save_tracking_config(cfg):
+    try:
+        with open(TRACKING_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+# ─── 路径映射转发（Path Mapping）配置持久化 ───
+# 当 App 因 SDK 限制无法修改 header 时，会把真实请求改写到 /mock/{path}，
+# 通过此映射表把特定 path 转发到真实目标 URL（例如 /sa → https://sc-sa.dramaboxdb.com/sa）。
+PATH_MAPPINGS_PATH = os.path.join(DATA_DIR, "path_mappings.json")
+
+def load_path_mappings():
+    """加载路径映射规则列表。不存在时返回空列表。"""
+    if os.path.exists(PATH_MAPPINGS_PATH):
+        try:
+            with open(PATH_MAPPINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+    return []
+
+def save_path_mappings(mappings):
+    try:
+        with open(PATH_MAPPINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(mappings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _normalize_match_path(p: str) -> str:
+    """规范化匹配路径：去除首尾空白，确保以 / 开头，去掉结尾斜杠（保留根 /）。"""
+    if not p:
+        return ""
+    p = p.strip()
+    if not p.startswith("/"):
+        p = "/" + p
+    if len(p) > 1 and p.endswith("/"):
+        p = p.rstrip("/")
+    return p
+
+def match_path_mapping(url_path: str, method: str = "ANY"):
+    """根据请求 path 与 method 匹配路径映射规则。
+
+    匹配规则（优先精确，其次最长前缀）：
+      - 精确相等：url_path == match_path
+      - 前缀匹配：url_path 以 match_path + "/" 开头（如 /sa/foo 命中 /sa）
+    返回最佳匹配映射 dict；无匹配返回 None。
+    """
+    url_path = _normalize_match_path(url_path)
+    best = None
+    best_score = (-1, -1)  # (是否精确匹配, match_path 长度)
+    method = (method or "ANY").upper()
+    for m in path_mappings:
+        if not m.get("enabled", True):
+            continue
+        mm = (m.get("method") or "ANY").upper()
+        if mm != "ANY" and mm != method:
+            continue
+        mp = _normalize_match_path(m.get("path", ""))
+        if not mp:
+            continue
+        exact = (url_path == mp)
+        prefix = url_path.startswith(mp + "/")
+        if not exact and not prefix:
+            continue
+        score = (1 if exact else 0, len(mp))
+        if score > best_score:
+            best_score = score
+            best = m
+    return best
+
+def build_mapping_target(mapping: dict, url_path: str, query_string: str):
+    """根据映射配置与当前请求，构造真实目标 URL（含原 query 参数）。"""
+    from urllib.parse import urlparse, urlunparse
+    target = (mapping.get("target_url") or "").strip()
+    if not target:
+        return None
+    if not target.startswith("http://") and not target.startswith("https://"):
+        target = "https://" + target
+    mp = _normalize_match_path(mapping.get("path", ""))
+    url_path_norm = _normalize_match_path(url_path)
+    # 计算剩余子路径（去掉匹配前缀，例如 /sa/foo 对于 /sa → /foo）
+    remainder = ""
+    if url_path_norm != mp and url_path_norm.startswith(mp + "/"):
+        remainder = url_path_norm[len(mp):]
+    parsed = urlparse(target)
+    base_path = parsed.path.rstrip("/")
+    new_path = base_path + remainder
+    if not new_path:
+        new_path = "/"
+    return urlunparse((
+        parsed.scheme or "https",
+        parsed.netloc,
+        new_path,
+        parsed.params,
+        query_string,  # 原 /mock/{path} 携带的 query 直接拼接（如 ?project=HWD）
+        parsed.fragment
+    ))
+
+def _check_type(value, expected_type):
+    """返回 (ok, actual)。兼容 bool 字符串序列化。"""
+    if expected_type == "bool":
+        if isinstance(value, bool):
+            return True, "bool"
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            return True, "bool"
+        return False, type(value).__name__
+    if expected_type == "number":
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return True, "number"
+        return False, type(value).__name__
+    if expected_type == "string":
+        # 非 bool/number 的标量都视作 string（含 None 由 required 处理）
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return True, "string"
+        return False, type(value).__name__
+    return True, type(value).__name__
+
+def _get_param(event_obj, name):
+    """从事件对象取参数值。埋点 SDK 通常把业务参数放到 properties 子对象里
+    （如 sa 上报：event.properties.button_name），故优先取 properties[name]，
+    找不到再回退到顶层（兼容扁平结构 / 旧格式）。
+    """
+    props = event_obj.get("properties")
+    if isinstance(props, dict) and name in props:
+        return props.get(name)
+    return event_obj.get(name)
+
+
+def _param_hits(actual, param):
+    """判断事件中的某参数是否『命中』规则（用于决定规则是否适用于该事件）。
+
+    命中 = 参数存在且非空，且满足规则对其值/类型的约束（规则未约束该项则不校验）。
+    """
+    if actual is None or (isinstance(actual, str) and actual.strip() == ""):
+        return False
+    expected_value = param.get("value", "")
+    expected_type = param.get("type", "")
+    if expected_value not in (None, ""):
+        if str(actual) != str(expected_value):
+            return False
+    if expected_type:
+        ok, _ = _check_type(actual, expected_type)
+        if not ok:
+            return False
+    return True
+
+
+def validate_tracking_event(event_obj, rule):
+    """对单个事件对象按一条规则校验。
+
+    校验语义（与埋点清单约定一致）：
+      1) 规则中配置了『固定 key + value』的参数（鉴别键）必须【全部】匹配，
+         事件才视为命中本规则（count += 1）。任一固定参数不匹配 → 视为无关事件，
+         忽略（不计数、不报错）。
+      2) 固定参数匹配后，再独立校验【其余参数】（如必填缺失、值不符、类型不符）。
+         这些校验结果仅作为提示展示，不影响命中：即使缺失/失败，仍算命中。
+
+    返回 (applies, validation_errors)：
+      - applies:           固定参数是否全部匹配（即是否命中）。
+      - validation_errors: 其余参数的校验问题列表（展示用，不挡命中）。
+    """
+    if not isinstance(event_obj, dict):
+        return False, []
+    params = rule.get("params", []) or []
+    # 固定参数 = 配置了期望值(value)的参数，作为规则的『鉴别键』。
+    fixed_params = [p for p in params if (p.get("value", "") not in (None, ""))]
+
+    # 1) 固定参数必须【全部】命中，规则才适用。
+    #    （例如某规则固定 from=ai_chat 且 button_name=会话列表，
+    #     只有两者同时满足才算命中；否则视为同名 buttonClick 的其它点击，忽略。）
+    if fixed_params:
+        for param in fixed_params:
+            name = param.get("name")
+            if name is None:
+                continue
+            if not _param_hits(_get_param(event_obj, name), param):
+                # 固定参数未匹配 → 无关事件，忽略
+                return False, []
+
+    # 2) 适用：校验其余参数（固定参数自身已匹配，不会再产生错误）。
+    #    这些校验问题仅展示用，不影响命中。
+    validation_errors = []
+    for param in params:
+        name = param.get("name")
+        if name is None:
+            continue
+        required = param.get("required", True)
+        expected_value = param.get("value", "")
+        expected_type = param.get("type", "")
+        actual = _get_param(event_obj, name)
+        if actual is None or (isinstance(actual, str) and actual.strip() == ""):
+            # 缺失：必填时报校验问题（展示为“未上报”）；非必填静默。
+            if required:
+                validation_errors.append({"param": name, "kind": "missing",
+                                          "message": f"缺失必填参数 {name}", "actual": None})
+            continue
+        # 值校验（固定参数已匹配，此处仅作保险；期望为空则跳过值比较）
+        if expected_value not in (None, ""):
+            if str(actual) != str(expected_value):
+                validation_errors.append({"param": name, "kind": "value",
+                                          "message": f"{name} 期望值 '{expected_value}'，实际 '{actual}'",
+                                          "actual": actual})
+                continue
+        # 类型校验
+        if expected_type:
+            ok, actual_type = _check_type(actual, expected_type)
+            if not ok:
+                validation_errors.append({"param": name, "kind": "type",
+                                          "message": f"{name} 期望类型 {expected_type}，实际 {actual_type}",
+                                          "actual": actual})
+    return True, validation_errors
+
+def decode_sensors_body(raw_str):
+    """神策(Sensors Data)埋点解密。
+
+    神策 SDK 上报的 request body 为 form 编码：
+        crc=-1255449489&gzip=1&data_list=<URL安全的 base64(gzip(json))>
+    该函数提取 data_list，做 URL-safe base64 解码 → gzip 解压 → JSON 解析，返回事件数组。
+
+    若 body 不是神策格式（如 iosLog 的 LZ4/JSON 等内部上报格式）则直接返回 None，
+    调用方会原样保留，不做任何改动。
+    """
+    if not raw_str or "data_list" not in raw_str:
+        return None
+    try:
+        parsed = urllib.parse.parse_qs(raw_str, keep_blank_values=True)
+        if "data_list" not in parsed or not parsed.get("data_list"):
+            return None
+        encoded = parsed["data_list"][0]
+        # URL-safe base64 长度非 4 的倍数时自动补齐 "="
+        rem = len(encoded) % 4
+        if rem:
+            encoded += "=" * (4 - rem)
+        compressed = base64.urlsafe_b64decode(encoded)
+        decompressed = gzip.decompress(compressed)
+        json_str = decompressed.decode("utf-8")
+        return json.loads(json_str)
+    except Exception as e:
+        print(f"⚠️ [神策解密] 失败: {e}")
+        return None
+
+
+def validate_tracking_body(body, rules, log_id, source_hit):
+    """遍历 body 事件数组，按 event 名匹配规则，更新聚合状态 tracking_hits。
+    返回本次请求内各规则校验明细（用于写回 log_entry）。
+    """
+    # 提取事件对象：兼容顶层数组、单个对象，以及被包裹/嵌套的结构
+    # （如 {"events":[...]}、{"data":[{"event":...}]} 等多层包裹）
+    event_list = []
+    raw = body if isinstance(body, list) else ([body] if isinstance(body, dict) else None)
+    if raw is None:
+        return {"parsed": False, "reason": "body 不是 JSON 对象/数组", "details": []}
+
+    def _collect_event_objs(objs):
+        for o in objs:
+            if isinstance(o, dict):
+                # 含 event 字段（且为字符串）的对象视为一条事件
+                if isinstance(o.get("event"), str):
+                    event_list.append(o)
+                # 继续递归其内部的对象/数组，避免漏掉包裹层
+                for v in o.values():
+                    if isinstance(v, (dict, list)):
+                        _collect_event_objs([v] if isinstance(v, dict) else v)
+            elif isinstance(o, list):
+                _collect_event_objs(o)
+
+    _collect_event_objs(raw)
+    # 兜底：整体确实是个事件对象但 event 非字符串时，仍尝试整体校验
+    if not event_list and isinstance(body, dict):
+        event_list = [body]
+
+    # 建立 event -> [rules] 索引
+    by_event = {}
+    for rule in rules:
+        by_event.setdefault(rule.get("event"), []).append(rule)
+
+    per_rule = {}  # rule_id -> {errors, sample}
+    for ev in event_list:
+        if not isinstance(ev, dict):
+            continue
+        ev_name = ev.get("event")
+        for rule in by_event.get(ev_name, []):
+            rid = rule.get("id")
+            applies, validation_errors = validate_tracking_event(ev, rule)
+            if not applies:
+                # 该事件与本规则无关（固定参数未全部匹配），忽略，不计数、不报错
+                continue
+            prev = per_rule.get(rid)
+            # 命中后保留最新校验结果（若此前无问题、本次有问题，则更新为带问题的，便于暴露）
+            if prev is None or (not prev["errors"] and validation_errors):
+                per_rule[rid] = {
+                    "errors": validation_errors,
+                    "sample": {"log_id": log_id, "event": ev_name,
+                               "params": {k: _get_param(ev, k) for p in rule.get("params", [])
+                                          if (k := p.get("name")) is not None}},
+                }
+
+    # 更新聚合状态（仅当该规则的事件在请求 body 中出现时才更新）
+    for rule in rules:
+        rid = rule.get("id")
+        pr = per_rule.get(rid)
+        if pr is None:
+            continue  # 请求 body 中未出现该规则的事件，跳过不更新
+        agg = tracking_hits.setdefault(rid, {
+            "event": rule.get("event"),
+            "scenario": rule.get("scenario"),
+            "hit": False,
+            "errors": [],
+            "samples": [],
+            "last_sample": None,
+            "count": 0,
+        })
+        # 固定参数匹配即算命中：count += 1，hit = True（不受其余参数校验影响）
+        agg["count"] += 1
+        agg["hit"] = True
+        agg["last_errors"] = pr["errors"]
+        agg["last_sample"] = pr["sample"]
+        # 汇总校验问题（去重，仅展示用，不挡命中）
+        for err in pr["errors"]:
+            if err not in agg["errors"]:
+                agg["errors"].append(err)
+        if pr["sample"] not in agg["samples"]:
+            agg["samples"].append(pr["sample"])
+            if len(agg["samples"]) > 10:
+                agg["samples"] = agg["samples"][-10:]
+
+    return {"parsed": True, "details": per_rule}
+
+# 启动时加载持久化配置
+tracking_rules = load_tracking_rules()
+tracking_config = load_tracking_config()
+load_tracking_archives()
+path_mappings = load_path_mappings()
 
 TELEMETRY_CONFIG_PATH = os.path.join(DATA_DIR, "telemetry_config.json")
 def get_or_create_device_id() -> str:
@@ -349,15 +767,143 @@ async def get_index_en():
         }
     )
 
+# ─── 跨网联通（Localtunnel）子系统状态 ───
+# 前端 /api/server-info 依赖 localtunnel_active / localtunnel_url / localtunnel_error
+# 三个字段，且会通过 POST /api/localtunnel/toggle 启停通道。此前后端缺失该实现，
+# 导致点击「跨网联通」后一直卡在「正在初始化」。
+LT_CONFIG_PATH = os.path.join(DATA_DIR, "localtunnel_config.json")
+lt_proc = None        # 当前 localtunnel 子进程（None 表示未运行）
+lt_active = False     # 是否已成功建立公网通道
+lt_url = ""           # 公网 URL
+lt_error = ""         # 错误信息（非空表示失败）
+_lt_lock = threading.Lock()
+
+
+def load_lt_config():
+    if os.path.exists(LT_CONFIG_PATH):
+        try:
+            with open(LT_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_lt_config(cfg):
+    try:
+        with open(LT_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _lt_reader():
+    """后台线程：读取 localtunnel 子进程输出，解析出公网 URL。"""
+    global lt_active, lt_url, lt_error, lt_proc
+    try:
+        for raw in lt_proc.stdout:
+            line = raw.strip()
+            if not line:
+                continue
+            # localtunnel 正常输出形如：your url is: https://xxxx.loca.lt
+            m = re.search(r"https?://[^\s'\"<>]+", line)
+            if m:
+                url = m.group(0).rstrip(".,)")
+                lt_url = url
+                lt_active = True
+                lt_error = ""
+                return
+        # 子进程退出且未取得 URL -> 视为失败
+        if lt_proc.poll() is not None and not lt_active:
+            lt_error = lt_error or "localtunnel 进程已退出（可能未安装或网络不通）"
+            lt_active = False
+    except Exception as e:
+        lt_error = f"读取 localtunnel 输出失败: {e}"
+        lt_active = False
+
+
+def start_localtunnel_async():
+    """在后台启动 localtunnel（npx 方式），不阻塞请求。"""
+    global lt_proc, lt_active, lt_url, lt_error
+    with _lt_lock:
+        if lt_proc and lt_proc.poll() is None:
+            return  # 已在运行
+        lt_active = False
+        lt_url = ""
+        lt_error = ""
+        npx = shutil.which("npx") or shutil.which("localtunnel")
+        if not npx:
+            lt_error = "未检测到 Node.js / npx，无法启动跨网通道（请先安装 Node.js）"
+            return
+        cfg = load_lt_config() or {}
+        cmd = [npx, "localtunnel", "--port", "8099"]
+        sub = (cfg.get("subdomain") or "").strip()
+        if sub:
+            cmd += ["--subdomain", sub]
+        try:
+            lt_proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+        except Exception as e:
+            lt_error = f"启动 localtunnel 失败: {e}"
+            return
+    threading.Thread(target=_lt_reader, daemon=True).start()
+
+
+def stop_localtunnel():
+    """停止 localtunnel 子进程并复位状态。"""
+    global lt_proc, lt_active, lt_url, lt_error
+    with _lt_lock:
+        if lt_proc and lt_proc.poll() is None:
+            try:
+                lt_proc.terminate()
+                lt_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    lt_proc.kill()
+                except Exception:
+                    pass
+        lt_proc = None
+        lt_active = False
+        lt_url = ""
+        lt_error = ""
+
+
+class LocaltunnelToggle(BaseModel):
+    enabled: bool = True
+
+
+@app.post("/api/localtunnel/toggle")
+async def localtunnel_toggle(payload: LocaltunnelToggle):
+    cfg = load_lt_config() or {}
+    if payload.enabled:
+        cfg["enabled"] = True
+        save_lt_config(cfg)
+        start_localtunnel_async()
+    else:
+        stop_localtunnel()
+        cfg["enabled"] = False
+        save_lt_config(cfg)
+    return {"status": "success", "active": lt_active, "url": lt_url, "error": lt_error}
+
+
 @app.get("/api/server-info")
 async def get_server_info():
     local_ip = get_local_ip()
     port = 8099
+    if lt_active and lt_url:
+        mock_url = lt_url.rstrip("/") + "/mock"
+    else:
+        mock_url = f"http://{local_ip}:{port}/mock"
     return {
         "ip": local_ip,
         "port": port,
-        "mock_url": f"http://{local_ip}:{port}/mock",
-        "os_name": os.name
+        "mock_url": mock_url,
+        "os_name": os.name,
+        "localtunnel_active": lt_active,
+        "localtunnel_url": lt_url,
+        "localtunnel_error": lt_error,
     }
 
 @app.get("/api/proxy.mobileconfig")
@@ -435,6 +981,38 @@ async def set_config(config: ConfigPayload):
     mock_global_enabled = config.global_enabled
     return {"status": "success", "global_enabled": mock_global_enabled}
 
+# ─── 路径映射转发（Path Mapping）API ───
+@app.get("/api/path-mappings")
+async def get_path_mappings():
+    return path_mappings
+
+class PathMappingListPayload(BaseModel):
+    mappings: list
+
+@app.post("/api/path-mappings")
+async def save_path_mappings_api(payload: PathMappingListPayload):
+    """整体保存路径映射列表（前端维护列表后整体提交，便于增删改）。"""
+    global path_mappings
+    clean = []
+    for m in payload.mappings:
+        if not isinstance(m, dict):
+            continue
+        mp = (m.get("path") or "").strip()
+        tu = (m.get("target_url") or "").strip()
+        if not mp or not tu:
+            continue
+        clean.append({
+            "path": mp,
+            "target_url": tu,
+            "method": (m.get("method") or "ANY"),
+            "enabled": bool(m.get("enabled", True)),
+            # 强制返回结果：非空时命中该映射直接返回此内容，不再转发（任意格式均可）
+            "force_response": m.get("force_response", "") or "",
+        })
+    path_mappings = clean
+    save_path_mappings(path_mappings)
+    return {"status": "success", "count": len(path_mappings)}
+
 AI_CONFIG_PATH = os.path.join(DATA_DIR, "ai_config.json")
 
 class AIConfigPayload(BaseModel):
@@ -476,6 +1054,189 @@ async def clear_logs():
     except Exception:
         pass
     return {"status": "cleared"}
+
+# ─── 埋点校验（Tracking Validation）API ───
+@app.get("/api/tracking/rules")
+async def get_tracking_rules():
+    return tracking_rules
+
+class TrackingRulesPayload(BaseModel):
+    rules: list
+
+@app.post("/api/tracking/rules")
+async def post_tracking_rules(payload: TrackingRulesPayload):
+    global tracking_rules
+    tracking_rules = payload.rules
+    save_tracking_rules(tracking_rules)
+    return {"status": "success", "count": len(tracking_rules)}
+
+@app.get("/api/tracking/config")
+async def get_tracking_config():
+    return tracking_config
+
+class TrackingConfigPayload(BaseModel):
+    sources: list
+
+@app.post("/api/tracking/config")
+async def post_tracking_config(payload: TrackingConfigPayload):
+    global tracking_config
+    tracking_config = {"sources": payload.sources}
+    save_tracking_config(tracking_config)
+    return {"status": "success", "config": tracking_config}
+
+@app.post("/api/tracking/start")
+async def start_tracking():
+    global tracking_recording, tracking_hits
+    tracking_hits = {}
+    tracking_recording = True
+    return {"status": "success", "recording": True}
+
+@app.post("/api/tracking/stop")
+async def stop_tracking():
+    global tracking_recording
+    tracking_recording = False
+    return {"status": "success", "recording": False}
+
+@app.get("/api/tracking/results")
+async def get_tracking_results():
+    global tracking_rules
+    total = len(tracking_rules)
+    hit_count = sum(1 for h in tracking_hits.values() if h.get("hit"))
+    # 校验问题数：命中但存在其余参数未上报/异常的规则条数（仅作提示，不挡命中）
+    error_count = sum(1 for h in tracking_hits.values() if h.get("errors"))
+    # 组装每条规则的聚合结果（保证清单所有规则都返回，包括从未命中的）
+    hits = {}
+    for rule in tracking_rules:
+        rid = rule.get("id")
+        agg = tracking_hits.get(rid)
+        if agg:
+            hits[rid] = {
+                "event": agg.get("event"),
+                "scenario": agg.get("scenario"),
+                "hit": agg.get("hit", False),
+                "errors": agg.get("errors", []),
+                "samples": agg.get("samples", []),
+                "last_sample": agg.get("last_sample"),
+                "count": agg.get("count", 0),
+            }
+        else:
+            hits[rid] = {
+                "event": rule.get("event"),
+                "scenario": rule.get("scenario"),
+                "hit": False,
+                "errors": [],
+                "samples": [],
+                "count": 0,
+            }
+    return {
+        "recording": tracking_recording,
+        "total": total,
+        "hit_count": hit_count,
+        "error_count": error_count,
+        "hits": hits,
+    }
+
+# ─── 埋点校验结果归档 ───
+class ArchivePayload(BaseModel):
+    name: Optional[str] = None
+
+@app.post("/api/tracking/archive")
+async def archive_tracking_results(payload: ArchivePayload):
+    """归档本次录制结果（快照规则 + 聚合命中），并清空当前规则列表与聚合结果（主列表不再显示）。"""
+    global tracking_hits, tracking_archives, tracking_rules
+    name = (payload.name or "").strip() or ("归档 " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    # 组装当前 hits（与 results 接口一致）
+    hits = {}
+    for rule in tracking_rules:
+        rid = rule.get("id")
+        agg = tracking_hits.get(rid)
+        if agg:
+            hits[rid] = {
+                "event": agg.get("event"),
+                "scenario": agg.get("scenario"),
+                "hit": agg.get("hit", False),
+                "errors": agg.get("errors", []),
+                "samples": agg.get("samples", []),
+                "last_sample": agg.get("last_sample"),
+                "count": agg.get("count", 0),
+            }
+        else:
+            hits[rid] = {
+                "event": rule.get("event"),
+                "scenario": rule.get("scenario"),
+                "hit": False, "errors": [], "samples": [], "count": 0,
+            }
+    total = len(tracking_rules)
+    hit_count = sum(1 for h in hits.values() if h.get("hit"))
+    error_count = sum(1 for h in hits.values() if h.get("errors"))
+    entry = {
+        "id": "arch_" + uuid.uuid4().hex[:10],
+        "name": name,
+        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "summary": {"total": total, "hit_count": hit_count, "error_count": error_count},
+        "rules": tracking_rules,
+        "hits": hits,
+    }
+    tracking_archives.insert(0, entry)
+    save_tracking_archives()
+    # 清空当前规则列表与聚合结果（主列表不再显示，等待下一段录制）
+    tracking_rules = []
+    tracking_hits = {}
+    save_tracking_rules(tracking_rules)
+    return {"status": "success", "archive_id": entry["id"]}
+
+
+@app.post("/api/tracking/clear")
+async def clear_tracking():
+    """清空埋点规则列表与当前聚合命中（不归档，供「清空列表」按钮使用）。"""
+    global tracking_rules, tracking_hits
+    tracking_rules = []
+    tracking_hits = {}
+    save_tracking_rules(tracking_rules)
+    return {"status": "success"}
+
+@app.get("/api/tracking/archives")
+async def get_tracking_archives():
+    """归档摘要列表（不含完整 hits，减小体积）。"""
+    return [{
+        "id": a.get("id"),
+        "name": a.get("name"),
+        "date": a.get("date"),
+        "summary": a.get("summary", {}),
+    } for a in tracking_archives]
+
+@app.get("/api/tracking/archive/{archive_id}")
+async def get_tracking_archive(archive_id: str):
+    entry = next((a for a in tracking_archives if a.get("id") == archive_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="归档不存在")
+    return entry
+
+@app.post("/api/tracking/archive/{archive_id}/restore")
+async def restore_tracking_archive(archive_id: str):
+    """将归档结果恢复到当前聚合（主列表重新显示）。"""
+    global tracking_hits
+    entry = next((a for a in tracking_archives if a.get("id") == archive_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="归档不存在")
+    for rid, h in entry.get("hits", {}).items():
+        tracking_hits[rid] = {
+            "event": h.get("event"),
+            "scenario": h.get("scenario"),
+            "hit": h.get("hit", False),
+            "errors": h.get("errors", []),
+            "samples": h.get("samples", []),
+            "last_sample": h.get("last_sample"),
+            "count": h.get("count", 0),
+        }
+    return {"status": "success"}
+
+@app.delete("/api/tracking/archive/{archive_id}")
+async def delete_tracking_archive(archive_id: str):
+    global tracking_archives
+    tracking_archives = [a for a in tracking_archives if a.get("id") != archive_id]
+    save_tracking_archives()
+    return {"status": "success"}
 
 @app.post("/api/replay-request")
 async def replay_request(data: ReplayRequestModel):
@@ -1064,6 +1825,17 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
         except Exception as e:
             body_str = f"❌ [解压失败] LZ4 解压出错: {str(e)}\n\n—— 原始数据 ──\n{body_str}"
 
+    # ─── 神策(Sensors Data)埋点解密：body 为 form 编码的 data_list(gzip+base64) ───
+    # 仅当 body 含 data_list 字段时触发；iosLog(LZ4/JSON) 等内部上报格式不受影响，原样保留。
+    sensors_json = decode_sensors_body(body_str)
+    if sensors_json is not None:
+        log_entry["is_sensors"] = True
+        log_entry["sensors_original"] = body_str  # 保留原始加密体，便于排查/重放
+        # 把解密后的 JSON 事件数组转回字符串，使后续 json.loads 成功并写入 body 展示
+        body_str = json.dumps(sensors_json, ensure_ascii=False)
+        _ev_n = len(sensors_json) if isinstance(sensors_json, list) else 1
+        print(f"\n🔓 [神策解密] path={url_path} 解密成功，事件数={_ev_n}")
+
     body_json = None
     try:
         body_json = json.loads(body_str)
@@ -1076,6 +1848,24 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
     # 填充 log_entry
     log_entry["body"] = body_json
     log_entry["req_size"] = req_size
+
+    # ─── 埋点校验：对命中来源接口的上报请求做严格校验并聚合 ───
+    try:
+        _sources = tracking_config.get("sources", [])
+        # 未配置任何来源关键字时，捕获所有 JSON 请求（更省心；
+        # 只有配置了关键字，才按 URL 包含匹配过滤）
+        if not _sources:
+            _src_hit = body_json is not None
+        else:
+            _src_hit = any(
+                (s and (s in (real_target_url or "") or s in (url_path or "")))
+                for s in _sources
+            ) or log_entry.get("is_sensors", False)
+        if _src_hit and tracking_recording and body_json is not None:
+            _tv = validate_tracking_body(body_json, tracking_rules, log_entry["id"], True)
+            log_entry["tracking_validation"] = _tv
+    except Exception as _tv_err:
+        log_entry["tracking_validation"] = {"parsed": False, "reason": str(_tv_err), "details": []}
 
     # ─── 智能匹配引擎 ───────────────────────────────────────────
     # 规则：收集所有方法匹配的规则，优先命中配置了“Matching Params”的规则，匹配参数越多优先级越高
@@ -1199,7 +1989,7 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                 media_type="application/json"
             )
 
-    # 未命中规则 (或者 Mock 开关关闭/规则关闭)，如果有 x-original-url，则进行代理透传
+    # 未命中规则 (或者 Mock 开关关闭/规则关闭)，尝试代理透传
     log_entry["mock_matched"] = False
     original_url = request.headers.get("x-original-url")
     if original_url:
@@ -1214,19 +2004,19 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
             parsed_url = urlparse(original_url)
             original_params = parse_qsl(parsed_url.query)
             current_params = parse_qsl(query_string) if query_string else []
-            
+
             merged_params = {}
             for k, v in original_params:
                 merged_params[k] = v
             for k, v in current_params:
                 merged_params[k] = v
-                
+
             new_query = urlencode(list(merged_params.items()))
-            
+
             scheme = parsed_url.scheme
             if "dramabox" in parsed_url.netloc:
                 scheme = "https"
-                
+
             real_url = urlunparse((
                 scheme,
                 parsed_url.netloc,
@@ -1235,191 +2025,254 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                 new_query,
                 parsed_url.fragment
             ))
-
-            print(f"\n✨ [MockServer Proxy] 转发请求: {method} {real_url}")
-            log_entry["proxy_real_url"] = real_url
-
-            proxy_headers = {}
-            excluded_headers = {
-                "host",
-                "x-original-url",
-                "x-original-host",
-                "content-length",
-                "x-forwarded-proto", "x-forwarded-for", "x-forwarded-port",
-                "x-forwarded-host", "x-real-ip", "x-scheme",
-                "connection", "keep-alive",
-                "x-encrypt-type",
-            }
-            for k, v in request.headers.items():
-                if k.lower() not in excluded_headers:
-                    proxy_headers[k] = v
-            
-            forwarded_keys = list(proxy_headers.keys())
-            print(f"   📋 [Proxy Headers] 共 {len(forwarded_keys)} 个头: {', '.join(forwarded_keys[:15])}{'...' if len(forwarded_keys) > 15 else ''}")
-            
-            is_stream_request = (
-                "text/event-stream" in request.headers.get("accept", "").lower() or
-                "stream" in url_path.lower()
+        except Exception as e:
+            log_entry["mock_response"] = f"Proxy error: invalid x-original-url ({original_url}): {str(e)}"
+            log_entry["mock_status"] = 502
+            log_entry["status"] = 502
+            log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+            log_entry["loading"] = False
+            log_entry.setdefault("resp_size", 0)
+            return Response(
+                content=json.dumps({"error": "MockServer Proxy Error", "details": f"invalid x-original-url: {str(e)}"}),
+                status_code=502,
+                media_type="application/json"
             )
+        return await _proxy_to_url(real_url, method, request, body_bytes, log_entry, request_start, url_path, query_string)
 
-            if is_stream_request:
-                async def stream_proxy():
-                    accumulated = []
-                    try:
-                        try:
-                            from curl_cffi.requests import AsyncSession
-                            async with AsyncSession(verify=False, proxy="") as client:
-                                async with client.stream(
-                                    method=method,
-                                    url=real_url,
-                                    headers=proxy_headers,
-                                    data=body_bytes,
-                                    timeout=60.0
-                                ) as resp:
-                                    log_entry["mock_status"] = resp.status_code
-                                    resp_headers = {}
-                                    for k, v in resp.headers.items():
-                                        if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
-                                            resp_headers[k] = v
-                                    log_entry["response_headers"] = resp_headers
-                                    log_entry["status"] = resp.status_code
-                                    
-                                    async for chunk in resp.aiter_bytes():
-                                        accumulated.append(chunk)
-                                        log_entry["mock_response"] = b"".join(accumulated).decode("utf-8", errors="ignore")
-                                        log_entry["resp_size"] = log_entry.get("resp_size", 0) + len(chunk)
-                                        yield chunk
-                        except Exception as stream_tls_err:
-                            print(f"[Stream Proxy] curl_cffi 失败，降级 httpx: {str(stream_tls_err)}")
-                            async with httpx.AsyncClient(verify=False, trust_env=False) as client:
-                                async with client.stream(
-                                    method=method,
-                                    url=real_url,
-                                    headers=proxy_headers,
-                                    content=body_bytes,
-                                    timeout=60.0
-                                ) as resp:
-                                    log_entry["mock_status"] = resp.status_code
-                                    resp_headers = {}
-                                    for k, v in resp.headers.items():
-                                        if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
-                                            resp_headers[k] = v
-                                    log_entry["response_headers"] = resp_headers
-                                    log_entry["status"] = resp.status_code
-                                    
-                                    async for chunk in resp.aiter_bytes():
-                                        accumulated.append(chunk)
-                                        log_entry["mock_response"] = b"".join(accumulated).decode("utf-8", errors="ignore")
-                                        log_entry["resp_size"] = log_entry.get("resp_size", 0) + len(chunk)
-                                        yield chunk
-                                    
-                    except Exception as e:
-                        import traceback
-                        err_detail = traceback.format_exc()
-                        print(f"[Stream Proxy Error] {err_detail}")
-                        log_entry["mock_status"] = 502
-                        log_entry["status"] = 502
-                        err_msg = json.dumps({"error": str(e)})
-                        log_entry["mock_response"] = log_entry.get("mock_response", "") + "\n" + err_msg
-                        yield err_msg.encode('utf-8')
-                    finally:
-                        log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
-                        log_entry["loading"] = False
-                        # 业务层错误识别（流式响应同样适用）
-                        _is_biz_err, _biz_status = detect_business_error(log_entry.get("mock_response"))
-                        if _is_biz_err:
-                            log_entry["business_error"] = True
-                            if _biz_status is not None:
-                                log_entry["business_status"] = _biz_status
-                            log_entry.setdefault("error", True)
-                        else:
-                            log_entry.setdefault("business_error", False)
+    # ─── 路径映射转发（无 x-original-url 时，按配置把 /mock/{path} 转发到真实目标 URL）───
+    # 典型场景：App 因 SDK 限制无法修改 header，把真实请求改写到 /mock/sa?project=HWD，
+    # 在此处根据映射表（/sa → https://sc-sa.dramaboxdb.com/sa）完成真实转发。
+    # 注意：App 改写后的完整 path 为 /mock/sa，映射配置里填写的是去掉 /mock 前缀的 /sa，
+    # 因此匹配与子路径拼接都基于「去掉 /mock 前缀」后的有效路径。
+    pm_eff_path = url_path
+    if pm_eff_path.startswith("/mock"):
+        pm_eff_path = pm_eff_path[len("/mock"):] or "/"
+    pm = match_path_mapping(pm_eff_path, method)
+    if pm:
+        # ─── 强制返回结果：命中映射且配置了 force_response 时，直接返回该内容，不再转发 ───
+        # 不限制格式，原样作为响应体返回（JSON / XML / 纯文本 / HTML 均可）。
+        force_resp = pm.get("force_response")
+        if force_resp is not None and str(force_resp).strip() != "":
+            _fr = str(force_resp)
+            log_entry["proxy_type"] = "path_mapping_force"
+            log_entry["proxy_match_path"] = pm.get("path")
+            log_entry["proxy_source_path"] = url_path
+            log_entry["mock_response"] = _fr
+            log_entry["mock_status"] = 200
+            log_entry["status"] = 200
+            log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+            log_entry["loading"] = False
+            log_entry.setdefault("resp_size", len(_fr.encode("utf-8", errors="ignore")))
+            print(f"\n🗺️ [Path Mapping] {method} {url_path} → 强制返回结果 (长度={len(_fr)})")
+            return Response(content=_fr, status_code=200, media_type="text/plain; charset=utf-8")
 
-                stream_headers = {
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                }
-                return StreamingResponse(stream_proxy(), media_type="text/event-stream", headers=stream_headers)
-            else:
-                # ─── 非 Stream 代理请求 ───────────────────────
-                resp = None
+        target = build_mapping_target(pm, pm_eff_path, query_string)
+        if target:
+            log_entry["proxy_real_url"] = target
+            log_entry["proxy_type"] = "path_mapping"
+            log_entry["proxy_match_path"] = pm.get("path")
+            log_entry["proxy_source_path"] = url_path
+            print(f"\n🗺️ [Path Mapping] {method} {url_path} → {target}  (rule: {pm.get('path')} → {pm.get('target_url')})")
+            return await _proxy_to_url(target, method, request, body_bytes, log_entry, request_start, url_path, query_string)
+
+    log_entry["mock_response"] = None
+    log_entry["status"] = 200
+    log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+    log_entry["loading"] = False
+    return {
+        "message": "Default Mock Response — 未命中任何规则",
+        "tips": "在左侧日志点击此请求，可一键填入规则并保存",
+        "captured_info": {"path": url_path, "query_params": query_params, "method": method}
+    }
+
+
+async def _proxy_to_url(real_url, method, request, body_bytes, log_entry, request_start, url_path, query_string):
+    """统一的代理转发出口：原样转发 App 请求头与 body 到 real_url（真实目标），支持 SSE 流式。
+    无论 x-original-url 还是路径映射命中，都走此函数。"""
+    print(f"\n✨ [MockServer Proxy] 转发请求: {method} {real_url}")
+    log_entry["proxy_real_url"] = real_url
+
+    proxy_headers = {}
+    excluded_headers = {
+        "host",
+        "x-original-url",
+        "x-original-host",
+        "content-length",
+        "x-forwarded-proto", "x-forwarded-for", "x-forwarded-port",
+        "x-forwarded-host", "x-real-ip", "x-scheme",
+        "connection", "keep-alive",
+        "x-encrypt-type",
+    }
+    for k, v in request.headers.items():
+        if k.lower() not in excluded_headers:
+            proxy_headers[k] = v
+
+    forwarded_keys = list(proxy_headers.keys())
+    print(f"   📋 [Proxy Headers] 共 {len(forwarded_keys)} 个头: {', '.join(forwarded_keys[:15])}{'...' if len(forwarded_keys) > 15 else ''}")
+
+    is_stream_request = (
+        "text/event-stream" in request.headers.get("accept", "").lower() or
+        "stream" in url_path.lower()
+    )
+
+    if is_stream_request:
+        async def stream_proxy():
+            accumulated = []
+            try:
                 try:
                     from curl_cffi.requests import AsyncSession
                     async with AsyncSession(verify=False, proxy="") as client:
-                        resp = await client.request(
+                        async with client.stream(
                             method=method,
                             url=real_url,
                             headers=proxy_headers,
                             data=body_bytes,
                             timeout=60.0
-                        )
-                except Exception as tls_err:
-                    print(f"[Proxy] curl_cffi 请求失败，降级到 httpx: {str(tls_err)}")
-                    try:
-                        async with httpx.AsyncClient(verify=False, trust_env=False) as client:
-                            resp = await client.request(
-                                method=method,
-                                url=real_url,
-                                headers=proxy_headers,
-                                content=body_bytes,
-                                timeout=60.0
-                            )
-                    except Exception as httpx_err:
-                        raise Exception(f"curl_cffi 和 httpx 均请求失败: {str(httpx_err)}") from httpx_err
-                
-                # ─── 安全提取响应数据（每一步独立 try/except，确保 log_entry 不会半途而废）───
-                if resp is None:
-                    raise Exception("Proxy response is None - both curl_cffi and httpx returned no response")
-                
-                resp_status = 502
-                resp_text = ""
-                resp_content = b""
-                resp_headers = {}
-                
-                try:
-                    resp_status = resp.status_code
-                except Exception as e:
-                    print(f"[Proxy WARN] 无法读取 status_code: {e}")
-                
-                try:
-                    resp_text = resp.text if resp.text else ""
-                except Exception as e:
-                    print(f"[Proxy WARN] 无法读取 response text: {e}")
-                    resp_text = f"[Response body decode failed: {str(e)}]"
-                
-                try:
-                    resp_content = resp.content if resp.content else b""
-                except Exception as e:
-                    print(f"[Proxy WARN] 无法读取 response content: {e}")
-                    resp_content = resp_text.encode("utf-8", errors="ignore") if resp_text else b""
-                
-                try:
-                    for k, v in (resp.headers.items() if hasattr(resp, 'headers') and resp.headers else []):
-                        if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
-                            resp_headers[k] = v
-                except Exception as e:
-                    print(f"[Proxy WARN] 无法读取 response headers: {e}")
-                
-                # ─── 填充 log_entry（所有关键字段必须在此写入）───
-                log_entry["mock_response"] = resp_text
-                log_entry["mock_status"] = resp_status
-                log_entry["response_headers"] = resp_headers
-                log_entry["status"] = resp_status
+                        ) as resp:
+                            log_entry["mock_status"] = resp.status_code
+                            resp_headers = {}
+                            for k, v in resp.headers.items():
+                                if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
+                                    resp_headers[k] = v
+                            log_entry["response_headers"] = resp_headers
+                            log_entry["status"] = resp.status_code
+
+                            async for chunk in resp.aiter_bytes():
+                                accumulated.append(chunk)
+                                log_entry["mock_response"] = b"".join(accumulated).decode("utf-8", errors="ignore")
+                                log_entry["resp_size"] = log_entry.get("resp_size", 0) + len(chunk)
+                                yield chunk
+                except Exception as stream_tls_err:
+                    print(f"[Stream Proxy] curl_cffi 失败，降级 httpx: {str(stream_tls_err)}")
+                    async with httpx.AsyncClient(verify=False, trust_env=False) as client:
+                        async with client.stream(
+                            method=method,
+                            url=real_url,
+                            headers=proxy_headers,
+                            content=body_bytes,
+                            timeout=60.0
+                        ) as resp:
+                            log_entry["mock_status"] = resp.status_code
+                            resp_headers = {}
+                            for k, v in resp.headers.items():
+                                if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
+                                    resp_headers[k] = v
+                            log_entry["response_headers"] = resp_headers
+                            log_entry["status"] = resp.status_code
+
+                            async for chunk in resp.aiter_bytes():
+                                accumulated.append(chunk)
+                                log_entry["mock_response"] = b"".join(accumulated).decode("utf-8", errors="ignore")
+                                log_entry["resp_size"] = log_entry.get("resp_size", 0) + len(chunk)
+                                yield chunk
+
+            except Exception as e:
+                import traceback
+                err_detail = traceback.format_exc()
+                print(f"[Stream Proxy Error] {err_detail}")
+                log_entry["mock_status"] = 502
+                log_entry["status"] = 502
+                err_msg = json.dumps({"error": str(e)})
+                log_entry["mock_response"] = log_entry.get("mock_response", "") + "\n" + err_msg
+                yield err_msg.encode('utf-8')
+            finally:
                 log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
                 log_entry["loading"] = False
-                log_entry["resp_size"] = (
-                    len(resp_content) +
-                    sum(len(str(k).encode('utf-8')) + len(str(v).encode('utf-8')) + 4 for k, v in resp_headers.items()) +
-                    15
-                )
-                
-                print(f"✅ [Proxy OK] {method} {real_url} → {resp_status} ({log_entry['duration_ms']}ms)")  # 诊断日志
-                
-                return Response(
-                    content=resp_content if resp_content else resp_text,
-                    status_code=resp_status,
-                    headers=resp_headers
-                )
+                _is_biz_err, _biz_status = detect_business_error(log_entry.get("mock_response"))
+                if _is_biz_err:
+                    log_entry["business_error"] = True
+                    if _biz_status is not None:
+                        log_entry["business_status"] = _biz_status
+                    log_entry.setdefault("error", True)
+                else:
+                    log_entry.setdefault("business_error", False)
+
+        stream_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        return StreamingResponse(stream_proxy(), media_type="text/event-stream", headers=stream_headers)
+    else:
+        try:
+            # ─── 非 Stream 代理请求 ───────────────────────
+            resp = None
+            try:
+                from curl_cffi.requests import AsyncSession
+                async with AsyncSession(verify=False, proxy="") as client:
+                    resp = await client.request(
+                        method=method,
+                        url=real_url,
+                        headers=proxy_headers,
+                        data=body_bytes,
+                        timeout=60.0
+                    )
+            except Exception as tls_err:
+                print(f"[Proxy] curl_cffi 请求失败，降级到 httpx: {str(tls_err)}")
+                try:
+                    async with httpx.AsyncClient(verify=False, trust_env=False) as client:
+                        resp = await client.request(
+                            method=method,
+                            url=real_url,
+                            headers=proxy_headers,
+                            content=body_bytes,
+                            timeout=60.0
+                        )
+                except Exception as httpx_err:
+                    raise Exception(f"curl_cffi 和 httpx 均请求失败: {str(httpx_err)}") from httpx_err
+
+            # ─── 安全提取响应数据（每一步独立 try/except，确保 log_entry 不会半途而废）───
+            if resp is None:
+                raise Exception("Proxy response is None - both curl_cffi and httpx returned no response")
+
+            resp_status = 502
+            resp_text = ""
+            resp_content = b""
+            resp_headers = {}
+
+            try:
+                resp_status = resp.status_code
+            except Exception as e:
+                print(f"[Proxy WARN] 无法读取 status_code: {e}")
+
+            try:
+                resp_text = resp.text if resp.text else ""
+            except Exception as e:
+                print(f"[Proxy WARN] 无法读取 response text: {e}")
+                resp_text = f"[Response body decode failed: {str(e)}]"
+
+            try:
+                resp_content = resp.content if resp.content else b""
+            except Exception as e:
+                print(f"[Proxy WARN] 无法读取 response content: {e}")
+                resp_content = resp_text.encode("utf-8", errors="ignore") if resp_text else b""
+
+            try:
+                for k, v in (resp.headers.items() if hasattr(resp, 'headers') and resp.headers else []):
+                    if k.lower() not in ["content-encoding", "transfer-encoding", "content-length", "connection"]:
+                        resp_headers[k] = v
+            except Exception as e:
+                print(f"[Proxy WARN] 无法读取 response headers: {e}")
+
+            # ─── 填充 log_entry（所有关键字段必须在此写入）───
+            log_entry["mock_response"] = resp_text
+            log_entry["mock_status"] = resp_status
+            log_entry["response_headers"] = resp_headers
+            log_entry["status"] = resp_status
+            log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
+            log_entry["loading"] = False
+            log_entry["resp_size"] = (
+                len(resp_content) +
+                sum(len(str(k).encode('utf-8')) + len(str(v).encode('utf-8')) + 4 for k, v in resp_headers.items()) +
+                15
+            )
+
+            print(f"✅ [Proxy OK] {method} {real_url} → {resp_status} ({log_entry['duration_ms']}ms)")  # 诊断日志
+
+            return Response(
+                content=resp_content if resp_content else resp_text,
+                status_code=resp_status,
+                headers=resp_headers
+            )
         except BaseException as e:
             import traceback
             err_detail = traceback.format_exc()
@@ -1431,22 +2284,12 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
             log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
             log_entry["loading"] = False
             log_entry.setdefault("resp_size", 0)
-            print(f"[MockServer PROXY ERROR] real_url={log_entry.get('proxy_real_url', original_url)}\n{err_detail}")
+            print(f"[MockServer PROXY ERROR] real_url={log_entry.get('proxy_real_url', real_url)}\n{err_detail}")
             return Response(
                 content=json.dumps({"error": "MockServer Proxy Error", "details": str(e)}),
                 status_code=status_code,
                 media_type="application/json"
             )
-
-    log_entry["mock_response"] = None
-    log_entry["status"] = 200
-    log_entry["duration_ms"] = round((time.time() - request_start) * 1000)
-    log_entry["loading"] = False
-    return {
-        "message": "Default Mock Response — 未命中任何规则",
-        "tips": "在左侧日志点击此请求，可一键填入规则并保存",
-        "captured_info": {"path": url_path, "query_params": query_params, "method": method}
-    }
 
 # ─── 遥测与全局统计上报模块 ───
 TELEMETRY_HEARTBEAT_URL = "https://my-mini-mock.lihongli528628.workers.dev/api/heartbeat"

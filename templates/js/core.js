@@ -100,6 +100,70 @@ async function loadTelemetryStats() {
     } catch (e) { }
 }
 
+// ─── Admin 大盘面板（双击侧边栏 Admin User 打开） ───
+function openAdminDashboard() {
+    if (document.getElementById('admin-dashboard-mask')) return;
+    const mask = document.createElement('div');
+    mask.className = 'tmodal-mask';
+    mask.id = 'admin-dashboard-mask';
+    mask.onclick = (e) => {
+        if (e.target === mask) { stopAdminDashRefresh(); mask.remove(); }
+    };
+    const modal = document.createElement('div');
+    modal.className = 'tmodal admin-dash';
+    modal.innerHTML = `
+        <h3>📊 大盘数据</h3>
+        <div class="tmodal-hint">小猫 Mock 全局服务的实时运行概况</div>
+        <div class="admin-grid">
+            <div class="admin-card online">
+                <div class="admin-val" id="adm-online">—</div>
+                <div class="admin-lbl">当前在线人数</div>
+            </div>
+            <div class="admin-card total">
+                <div class="admin-val" id="adm-total">—</div>
+                <div class="admin-lbl">总注册人数</div>
+            </div>
+            <div class="admin-card packets">
+                <div class="admin-val" id="adm-packets">—</div>
+                <div class="admin-lbl">累计抓包请求量</div>
+            </div>
+            <div class="admin-card mocked">
+                <div class="admin-val" id="adm-mocked">—</div>
+                <div class="admin-lbl">本次会话 Mock 命中</div>
+            </div>
+            <div class="admin-card session">
+                <div class="admin-val" id="adm-session">—</div>
+                <div class="admin-lbl">本次会话代理请求</div>
+            </div>
+        </div>
+        <div class="tmodal-actions">
+            <button onclick="refreshAdminDashboard()">🔄 刷新</button>
+            <button class="tmodal-save" onclick="this.closest('.tmodal-mask').remove(); stopAdminDashRefresh();">关闭</button>
+        </div>`;
+    mask.appendChild(modal);
+    document.body.appendChild(mask);
+    refreshAdminDashboard();
+    window._adminDashTimer = setInterval(refreshAdminDashboard, 5000);
+}
+
+function stopAdminDashRefresh() {
+    if (window._adminDashTimer) { clearInterval(window._adminDashTimer); window._adminDashTimer = null; }
+}
+
+async function refreshAdminDashboard() {
+    try {
+        const res = await fetch('/api/telemetry-stats');
+        const data = await res.json();
+        if (!data || data.error) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+        set('adm-online', (data.online_users ?? 0).toLocaleString() + ' 人');
+        set('adm-total', (data.total_users ?? 0).toLocaleString() + ' 人');
+        set('adm-packets', (data.total_packets ?? 0).toLocaleString() + ' 次');
+        set('adm-mocked', (data.session_mocked ?? 0).toLocaleString() + ' 次');
+        set('adm-session', (data.session_total ?? 0).toLocaleString() + ' 次');
+    } catch (e) { }
+}
+
 // ─── 获取全局 Mock 状态并初始化开关 ───
 async function loadGlobalConfig() {
     try {
@@ -138,7 +202,11 @@ function switchTab(tabId, el) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
-    el.classList.add('active');
+    // 兼容未传入 el 的调用（如 openPathMappingManager），按 tabId 反查对应按钮
+    if (!el) {
+        el = document.querySelector('.tab-btn[onclick*="' + tabId + '"]');
+    }
+    if (el) el.classList.add('active');
     // #request-tab 不是独立的 .tab-content 元素，其内容在 #right-panel 中
     const tabElement = document.getElementById(tabId);
     if (tabElement) {
@@ -153,6 +221,11 @@ function switchTab(tabId, el) {
     if (tabId === 'request-tab' && typeof currentSubTab !== 'undefined') {
         switchSubTab(currentSubTab);
     }
+
+    // 切到服务设置 tab 时，初始化路径映射面板
+    if (tabId === 'connect-tab' && typeof initPathMappingPanel === 'function') {
+        initPathMappingPanel();
+    }
 }
 
 // ─── 子选项卡切换 (Dashboard / Logs / Analytics) ───
@@ -161,9 +234,10 @@ let currentSubTab = 'dashboard';
 function switchSubTab(mode) {
     currentSubTab = mode;
     
-    // 切换顶栏按钮 active 样式
+    // 切换顶栏按钮 active 样式（mode -> 中文标签映射）
+    const SUBTAB_LABELS = { dashboard: '数据概览', logs: '实时日志', analytics: '流量分析', tracking: '埋点校验' };
     document.querySelectorAll('.middle-subtabs .subtab').forEach(tab => {
-        if (tab.innerText.toLowerCase() === mode.toLowerCase()) {
+        if (tab.innerText.trim() === (SUBTAB_LABELS[mode] || mode)) {
             tab.classList.add('active');
         } else {
             tab.classList.remove('active');
@@ -171,28 +245,39 @@ function switchSubTab(mode) {
     });
 
     const noSelect = document.getElementById('no-selection-state');
+    const selState = document.getElementById('selection-state');
     const details = document.getElementById('details-layout');
     const logs = document.getElementById('logs-layout');
     const analytics = document.getElementById('analytics-layout');
+    const tracking = document.getElementById('tracking-layout');
 
     // 隐藏所有主视图
     if (noSelect) noSelect.style.display = 'none';
+    if (selState) selState.style.display = 'none';
     if (details) details.style.display = 'none';
     if (logs) logs.style.display = 'none';
     if (analytics) analytics.style.display = 'none';
+    if (tracking) tracking.style.display = 'none';
 
     if (mode === 'dashboard') {
         if (currentSelectedLogId) {
+            if (selState) selState.style.display = 'flex';
             if (details) details.style.display = 'grid';
         } else {
             if (noSelect) noSelect.style.display = 'flex';
         }
     } else if (mode === 'logs') {
+        if (selState) selState.style.display = 'flex';
         if (logs) logs.style.display = 'flex';
         renderTerminalLogs();
     } else if (mode === 'analytics') {
+        if (selState) selState.style.display = 'flex';
         if (analytics) analytics.style.display = 'flex';
         renderAnalyticsData();
+    } else if (mode === 'tracking') {
+        if (selState) selState.style.display = 'flex';
+        if (tracking) tracking.style.display = 'flex';
+        initTrackingPanel();
     }
 }
 

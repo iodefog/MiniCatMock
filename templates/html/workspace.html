@@ -4,11 +4,12 @@
             <!-- ─── Column 2: Requests Log List ─── -->
             <div id="left-panel">
                 <div class="middle-header">
-                    <h2 class="middle-title">小猫 Mock 工作空间</h2>
+                    <h2 class="middle-title">抓包列表</h2>
                     <div class="middle-subtabs">
                         <span class="subtab active" onclick="switchSubTab('dashboard')">数据概览</span>
                         <span class="subtab" onclick="switchSubTab('logs')">实时日志</span>
                         <span class="subtab" onclick="switchSubTab('analytics')">流量分析</span>
+                        <span class="subtab" onclick="switchSubTab('tracking')">埋点校验</span>
                     </div>
                     <div class="middle-actions">
                         <button class="btn-refresh" onclick="loadLogs()" title="Refresh" data-i18n-title="refresh_btn"
@@ -32,9 +33,10 @@
                         <button class="filter-btn" onclick="setLogFilter('missed', this)" data-i18n="filter_missed">透传</button>
                         <button class="filter-btn" onclick="setLogFilter('error', this)">异常</button>
                         <div class="filter-toggle-wrap">
-                            <button class="filter-toggle-btn active" id="filter-logs-toggle" onclick="toggleLogFilter()" title="开启后隐藏 path 仅为 \"/\" 的请求">
+                            <button class="filter-toggle-btn active" id="filter-logs-toggle" onclick="onFilterToggleClick()" ondblclick="openLogFilterManager()" title="单击：过滤根路径「/」请求；双击：管理路径过滤（/sa、/ioslog 等）">
                                 <span class="filter-toggle-dot"></span>
-                                过滤日志
+                                <span class="filter-toggle-label">过滤日志</span>
+                                <span class="path-filter-tag" id="path-filter-tag" style="display:none;"></span>
                             </button>
                         </div>
                     </div>
@@ -155,7 +157,7 @@
                                     </div>
 
                                     <div style="position: relative;">
-                                        <textarea id="global-ai-prompt" placeholder="描述您想要的 Mock 数据或要做的接口操作（注入延迟、重新请求等）... 例如：生成一个包含 id、昵称、头像和 vip 等级（1-5）的用户信息，外层包裹 code=0。也可点击上方快捷芯片自动填入。" rows="5" style="width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 12px 100px 12px 12px; font-size: 12px; line-height: 1.5; resize: none; outline: none; transition: border-color 0.2s; min-height: 200px;"></textarea>
+                                        <textarea id="global-ai-prompt" placeholder="描述您想要的 Mock 数据或要做的接口操作（注入延迟、重新请求等）... 例如：生成一个包含 id、昵称、头像和 vip 等级（1-5）的用户信息，外层包裹 code=0。也可点击上方快捷标签自动填入。" rows="5" style="width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 12px 100px 12px 12px; font-size: 12px; line-height: 1.5; resize: none; outline: none; transition: border-color 0.2s; min-height: 200px;"></textarea>
                                         <button class="btn-purple" id="btn-global-ai-generate" onclick="runGlobalAIGenerate()" style="position: absolute; right: 8px; bottom: 8px; padding: 6px 14px; font-size: 11px; display: flex; align-items: center; gap: 4px; border-radius: 6px; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.25); height: 28px; line-height: 1;">
                                             <span data-i18n="btn_ai_generate">🚀 生成规则</span>
                                         </button>
@@ -302,6 +304,58 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Column: Tracking Validation Dashboard -->
+                    <div id="tracking-layout" class="tracking-dashboard" style="display: none;">
+                        <div class="tracking-header">
+                            <div class="tracking-title-group">
+                                <span class="tracking-icon">🎯</span>
+                                <h3>埋点校验</h3>
+                                <span id="tracking-rec-badge" class="tracking-rec-badge stopped">● 未录制</span>
+                                <span id="tracking-rec-duration" style="font-size: 12px; font-weight: 600; color: var(--red);"></span>
+                            </div>
+                            <div class="tracking-header-actions">
+                                <div class="tracking-sources" id="tracking-sources" title="来源接口关键字"></div>
+                                <button class="btn-tracking-edit-src" onclick="openTrackingSourceEditor()">⚙️ 来源</button>
+                                <button id="btn-tracking-rec" class="btn-tracking-rec" onclick="toggleTrackingRecording()">⏺ 开始录制</button>
+                            </div>
+                        </div>
+
+                        <div id="tracking-rec-hint" style="font-size: 12px; font-weight: 600; padding: 6px 0; color: var(--text-muted); text-align: center;"></div>
+
+                        <div class="tracking-overview">
+                            <div class="tracking-stat total">
+                                <div class="tstat-val" id="tracking-stat-total">0</div>
+                                <div class="tstat-lbl">规则总数</div>
+                            </div>
+                            <div class="tracking-stat hit">
+                                <div class="tstat-val" id="tracking-stat-hit">0</div>
+                                <div class="tstat-lbl">已命中</div>
+                            </div>
+                            <div class="tracking-stat err">
+                                <div class="tstat-val" id="tracking-stat-err">0</div>
+                                <div class="tstat-lbl">异常</div>
+                            </div>
+                        </div>
+
+                        <div class="tracking-toolbar">
+                            <button class="btn-tracking-add" onclick="openTrackingRuleEditor(null)">➕ 新增埋点规则</button>
+                            <button class="btn-tracking-import" onclick="openTrackingImport()">📥 批量粘贴导入</button>
+                            <button class="btn-tracking-ai" onclick="openTrackingAIGenerate()">✨ AI批量生成</button>
+                            <button class="btn-tracking-archive" onclick="openArchiveSave()">📦 归档本次结果</button>
+                            <button class="btn-tracking-archive-list" onclick="openArchiveList()">📂 归档列表</button>
+                            <button class="btn-tracking-clear" onclick="clearTrackingRules()">🗑️ 清空列表</button>
+                            <span class="tracking-hint">从「开始录制」到「结束」，命中打勾，参数缺失/值错/类型错标红</span>
+                        </div>
+
+                        <div class="tracking-rules-list" id="tracking-rules-list">
+                            <div class="tracking-empty" id="tracking-empty" style="display:none;">
+                                <div class="icon">📋</div>
+                                暂无埋点规则<br>
+                                <span style="font-size: 11px; color: var(--text-dim);">点击「新增埋点规则」或「批量粘贴导入」开始配置</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="details-layout" class="details-full" style="display: none; height: 100%;">
                         <div class="middle-header" style="display: flex !important; flex-direction: row !important; justify-content: flex-start !important; align-items: center !important; padding: 14px 20px !important; border-bottom: none !important;">
                             <h2 class="middle-title">请求详情查看</h2>
@@ -316,6 +370,7 @@
                                 <button class="details-tab" onclick="switchDetailsSubTab('request')">请求详情 (REQUEST)</button>
                                 <button class="details-tab" onclick="switchDetailsSubTab('composer')">cURL 发送</button>
                                 <button class="btn-config-mock" onclick="openMockDrawer()" title="打开 Mock 配置抽屉" style="margin-left:auto; background: var(--surface2); color: var(--text); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; border: 1px solid var(--border); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">⚙️ 配置 Mock</button>
+                                <button class="btn-config-mock" onclick="openPathMappingManager()" title="配置 /sa 等路径映射转发" style="background: var(--surface2); color: var(--text); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; border: 1px solid var(--border); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">🗺️ 路径映射</button>
                                 <button class="btn-copy-req" onclick="copyText('inspect-req-url')" title="复制完整URL">📋
                                     复制 URL</button>
                             </div>
@@ -578,170 +633,183 @@
 
                 <!-- Tab 3: Device Connections & Settings Guide -->
                 <div id="connect-tab" class="tab-content scroll-container">
-                    <div style="max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+                    <div class="settings-page" style="max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px;">
 
-                        <div class="settings-header-card">
-                            <div class="settings-info-block">
-                                <div class="settings-icon-box">🔧</div>
-                                <div class="settings-text-box">
-                                    <h3 data-i18n="settings_title">AI & Mock 服务控制中心</h3>
-                                    <p data-i18n="settings_subtitle">配置您的 AI 模型服务提供商、数据加密规则以及局域网多端设备连接指南。</p>
+                        <!-- ─── 区块 1: 服务控制中心 ─── -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: rgba(99,102,241,0.1); color: var(--purple);">⚙️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title" data-i18n="settings_title">AI & Mock 服务控制中心</h3>
+                                    <p class="settings-card-desc" data-i18n="settings_subtitle">配置 AI 模型服务、数据加密规则及多端设备连接</p>
                                 </div>
                             </div>
-                            <div class="settings-actions-block">
-                                <button class="btn-purple" id="btn-open-ai-settings" onclick="openAISettings()"
-                                    style="padding: 10px 18px;">
-                                    <span data-i18n="settings_btn_ai">⚙️ 配置 AI 接口</span>
-                                    <span id="ai-key-status-badge" class="ai-key-status notset"
-                                        style="margin-left: 4px;" data-i18n="settings_ai_status_notset">未配置</span>
+                            <div class="settings-card-body" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                <button class="btn-purple" id="btn-open-ai-settings" onclick="openAISettings()">
+                                    <span>⚙️</span>
+                                    <span data-i18n="settings_btn_ai">配置 AI 接口</span>
+                                    <span id="ai-key-status-badge" class="ai-key-status notset" data-i18n="settings_ai_status_notset">未配置</span>
                                 </button>
-                                <button class="btn-secondary" onclick="toggleTheme()" style="padding: 10px 18px;" data-i18n="btn_toggle_theme">
-                                    🌓 切换明暗主题 (🌗)
+                                <button class="btn-settings-action" onclick="toggleTheme()" title="切换明暗主题">
+                                    <span>🌓</span>
+                                    <span data-i18n="btn_toggle_theme">切换主题</span>
                                 </button>
-                                <button class="btn-secondary" onclick="toggleLanguage()" style="padding: 10px 18px;">
-                                    🌍 <span data-i18n="btn_toggle_lang">切换语言 (EN/中)</span>
+                                <button class="btn-settings-action" onclick="toggleLanguage()" title="切换中英文">
+                                    <span>🌍</span>
+                                    <span data-i18n="btn_toggle_lang">EN/中</span>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Scan Connect Area -->
-                        <div style="text-align: center; margin-bottom: 8px;">
-                            <h2 style="font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 8px;">
-                                扫码接入手机设备</h2>
-                            <p style="color: var(--text-muted); font-size: 13px;">无需手动配置系统代理，一键建立高拟真网络抓包与 Mock 专用通道</p>
-                        </div>
-
-                        <!-- Connection Method Selection -->
-                        <div class="connection-mode-selector">
-                            <label class="mode-card active" id="mode-lan-label">
-                                <input type="radio" name="connection-mode" value="lan" checked onchange="onConnectionModeChange('lan')" class="mode-radio">
-                                <div class="mode-header">
-                                    <div class="mode-icon-wrapper">📶</div>
-                                    <span class="mode-title">局域网直连 (LAN)</span>
-                                    <span class="recommend-badge">推荐</span>
+                        <!-- ─── 区块 2: 设备连接 ─── -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: rgba(16,185,129,0.1); color: var(--green);">📱</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">扫码接入手机设备</h3>
+                                    <p class="settings-card-desc">无需手动配置系统代理，一键建立高拟真网络抓包与 Mock 专用通道</p>
                                 </div>
-                                <span class="mode-desc">手机与电脑在同一 Wi-Fi，数据在局域网内直接传输，速度极快且绝对安全。</span>
-                                <div class="mode-check-badge"></div>
-                            </label>
-                            
-                            <label class="mode-card" id="mode-tunnel-label">
-                                <input type="radio" name="connection-mode" value="tunnel" onchange="onConnectionModeChange('tunnel')" class="mode-radio">
-                                <div class="mode-header">
-                                    <div class="mode-icon-wrapper">🌐</div>
-                                    <span class="mode-title">跨网联通 (Tunnel)</span>
+                            </div>
+                            <div class="settings-card-body" style="display: flex; flex-direction: column; gap: 20px;">
+
+                                <!-- Connection Method Selection -->
+                                <div class="connection-mode-selector" style="margin: 0;">
+                                    <label class="mode-card active" id="mode-lan-label">
+                                        <input type="radio" name="connection-mode" value="lan" checked onchange="onConnectionModeChange('lan')" class="mode-radio">
+                                        <div class="mode-header">
+                                            <div class="mode-icon-wrapper">📶</div>
+                                            <span class="mode-title">局域网直连 (LAN)</span>
+                                            <span class="recommend-badge">推荐</span>
+                                        </div>
+                                        <span class="mode-desc">手机与电脑在同一 Wi-Fi，数据在局域网内直接传输，速度极快且绝对安全。</span>
+                                        <div class="mode-check-badge"></div>
+                                    </label>
+                                    <label class="mode-card" id="mode-tunnel-label">
+                                        <input type="radio" name="connection-mode" value="tunnel" onchange="onConnectionModeChange('tunnel')" class="mode-radio">
+                                        <div class="mode-header">
+                                            <div class="mode-icon-wrapper">🌐</div>
+                                            <span class="mode-title">跨网联通 (Tunnel)</span>
+                                        </div>
+                                        <span class="mode-desc">基于公网安全隧道，适用于 4G/5G、跨网段或无法连接同一 Wi-Fi 的复杂场景。</span>
+                                        <div class="mode-check-badge"></div>
+                                    </label>
                                 </div>
-                                <span class="mode-desc">基于公网安全隧道，适用于 4G/5G、跨网段或无法连接同一 Wi-Fi 的复杂场景。</span>
-                                <div class="mode-check-badge"></div>
-                            </label>
-                        </div>
 
-                        <!-- Tunnel Status Container -->
-                        <div id="tunnel-status-container" style="display: none; text-align: center; margin-top: -12px; margin-bottom: 12px;">
-                            <span id="tunnel-status-badge" style="padding: 6px 12px; border-radius: var(--radius-md); font-size: 12px; font-weight: 600; background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border);">
-                                ⏳ 正在初始化通道...
-                            </span>
-                            <span id="tunnel-url-copy-btn" style="display: inline-block; margin-left: 12px; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500; display: none;" onclick="copyTunnelUrl()">📋 复制通道链接</span>
-                        </div>
-
-                        <!-- Security Assessment & Warning Card -->
-                        <div id="tunnel-security-warning" class="premium-warning-card" style="display: none;">
-                            <div class="premium-warning-title">
-                                <span>🔒 跨网联通安全性说明与警示</span>
-                            </div>
-                            <div class="premium-warning-content">
-                                1. <strong>公网暴露风险</strong>：开启后，小猫 Mock 服务将通过外部公网域名临时暴露。任何获取此链接的设备均可发起请求。<strong>请避免在 Mock 响应体或匹配规则中写入机密或敏感的个人与业务数据</strong>。<br>
-                                2. <strong>即用即开原则</strong>：强烈建议仅在进行跨网络调试（如外网测试、真机 4G/5G 联调）时开启。调试完成后，<strong>请立即切回「局域网直连」模式</strong>以释放并关闭公网通道。<br>
-                                3. <strong>代理中转安全</strong>：数据会经过第三方 Localtunnel 中转节点。尽管传输使用 HTTPS 加密，仍需注意不要传输核心保密数据。
-                            </div>
-                        </div>
-
-                        <div id="win-firewall-warning"
-                            style="display: none; background: var(--orange-light); border: 1px solid var(--orange); border-radius: var(--radius-md); padding: 16px;">
-                            <h4 style="margin: 0 0 8px 0; color: var(--orange); font-size: 14px; font-weight: 700;">⚠️
-                                Windows 网络与防火墙配置提示</h4>
-                            <p style="margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6;">
-                                若手机扫码后<strong>无法建立连接</strong>，请排查 Windows Defender
-                                防火墙：允许「python.exe」或「小猫 Mock.exe」在<strong>公用和专用网络</strong>中传入连接；若在 Parallels 等虚拟机中运行
-                                Windows，需将虚拟机网络设置为<strong>桥接模式 (Bridged)</strong>。
-                            </p>
-                        </div>
-
-                        <div
-                            style="display: flex; flex-wrap: wrap; gap: 30px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 30px; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);">
-                            <div
-                                style="flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--surface2); padding: 20px; border-radius: var(--radius-lg); width: 200px; border: 1px solid var(--border);">
-                                <div id="qrcode-loading"
-                                    style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">⏳ 获取局域网 IP 中...
+                                <!-- Tunnel Status -->
+                                <div id="tunnel-status-container" style="display: none; text-align: center;">
+                                    <span id="tunnel-status-badge" class="tunnel-status-badge-inline">⏳ 正在初始化通道...</span>
+                                    <span id="tunnel-url-copy-btn" style="display: none; margin-left: 12px; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="copyTunnelUrl()">📋 复制通道链接</span>
                                 </div>
-                                <div id="qrcode" style="display: none;"></div>
-                                <div class="mock-url-text" id="mock-url-text">正在获取...</div>
-                            </div>
 
-                            <div style="flex: 1; min-width: 280px;">
-                                <ul class="guide-steps" style="margin: 0; padding: 0; list-style: none;">
-                                    <li style="margin-bottom: 20px; display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">1</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">连接相同
-                                                Wi-Fi 局域网</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">确保测试手机与运行本服务的
-                                                Mac/PC 电脑处在<strong>同一个局域网</strong>环境中。</span>
+                                <!-- Tunnel Security Warning -->
+                                <div id="tunnel-security-warning" class="settings-warning-card" style="display: none;">
+                                    <span class="settings-warning-icon">🔒</span>
+                                    <div class="settings-warning-body">
+                                        <strong>跨网联通安全性说明与警示</strong>
+                                        <ol style="margin: 8px 0 0 16px; font-size: 12px; line-height: 1.6; color: var(--text-muted);">
+                                            <li><strong>公网暴露风险</strong>：开启后服务将通过外部公网域名临时暴露，<strong>请避免在 Mock 中写入敏感数据</strong>。</li>
+                                            <li><strong>即用即开原则</strong>：调试完成后<strong>请立即切回「局域网直连」模式</strong>以关闭公网通道。</li>
+                                            <li><strong>传输加密</strong>：数据通过 HTTPS 加密中转，但仍需注意不要传输核心保密数据。</li>
+                                        </ol>
+                                    </div>
+                                </div>
+
+                                <!-- Windows Firewall Warning -->
+                                <div id="win-firewall-warning" class="settings-warning-card" style="display: none; border-left-color: var(--orange); background: rgba(245,158,11,0.04);">
+                                    <span class="settings-warning-icon">🪟</span>
+                                    <div class="settings-warning-body">
+                                        <strong>Windows 网络与防火墙配置提示</strong>
+                                        <p style="margin: 6px 0 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+                                            若手机扫码后<strong>无法建立连接</strong>，请排查 Windows Defender 防火墙：允许「python.exe」或「小猫 Mock.exe」在<strong>公用和专用网络</strong>中传入连接；若在 Parallels 等虚拟机中运行 Windows，需将虚拟机网络设置为<strong>桥接模式 (Bridged)</strong>。</p>
+                                    </div>
+                                </div>
+
+                                <!-- QR Code + Guide Steps -->
+                                <div class="settings-connect-row">
+                                    <div class="settings-qr-card">
+                                        <div class="settings-qr-inner">
+                                            <div id="qrcode-loading" class="settings-qr-loading">⏳ 获取局域网 IP 中...</div>
+                                            <div id="qrcode" style="display: none;"></div>
+                                            <div class="mock-url-text" id="mock-url-text">正在获取...</div>
                                         </div>
-                                    </li>
-                                    <li style="margin-bottom: 20px; display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">2</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">App
-                                                扫一扫建立连接</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">在 App 内测试版中打开自带的
-                                                Debug 调试面板，点击<strong>「扫一扫建立连接」</strong>扫描左侧二维码。</span>
+                                    </div>
+                                    <div class="settings-guide-steps">
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">1</span>
+                                            <div class="settings-step-content">
+                                                <strong>连接相同 Wi-Fi 局域网</strong>
+                                                <span>确保测试手机与运行本服务的 Mac/PC 电脑处在<strong>同一个局域网</strong>环境中。</span>
+                                            </div>
                                         </div>
-                                    </li>
-                                    <li style="display: flex; gap: 12px; align-items: start;">
-                                        <span class="step-index">3</span>
-                                        <div>
-                                            <strong
-                                                style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--text);">启用
-                                                Mock 转发服务</strong>
-                                            <span style="font-size: 12px; color: var(--text-muted);">连接成功后，在 App
-                                                内开启<strong>「启用 Mock 转发」</strong>开关，所有客户端发出的请求即可在左侧列表实时捕获推送！</span>
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">2</span>
+                                            <div class="settings-step-content">
+                                                <strong>App 扫一扫建立连接</strong>
+                                                <span>在 App 内测试版中打开自带的 Debug 调试面板，点击<strong>「扫一扫建立连接」</strong>扫描左侧二维码。</span>
+                                            </div>
                                         </div>
-                                    </li>
-                                </ul>
+                                        <div class="settings-step">
+                                            <span class="settings-step-num">3</span>
+                                            <div class="settings-step-content">
+                                                <strong>启用 Mock 转发服务</strong>
+                                                <span>连接成功后，在 App 内开启<strong>「启用 Mock 转发」</strong>开关，所有客户端发出的请求即可在左侧列表实时捕获推送！</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Troubleshoot Guide -->
-                        <div
-                            style="background: var(--red-light); border-left: 4px solid var(--red); border-radius: var(--radius-md); padding: 20px;">
-                            <h4 style="margin: 0 0 10px 0; color: var(--red); font-size: 14px; font-weight: 700;">⚠️ 连不上
-                                / 网络请求一直超时？必看排障指南：</h4>
-                            <div
-                                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 10px;">
-                                <div
-                                    style="background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                                    <strong
-                                        style="color: var(--text); font-size: 12px; display: block; margin-bottom: 4px;">🔒
-                                        系统防火墙拦截</strong>
-                                    <p style="margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
-                                        <strong>Mac</strong>: 系统设置 ➔ 网络 ➔ 防火墙 ➔ 选项，确保 Python/Mock 服务允许传入连接。<br>
-                                        <strong>Win</strong>: 需在弹窗时勾选专用和公用网络允许传入。
+                        <!-- ─── 区块 3: 路径映射转发 (可折叠) ─── -->
+                        <details class="settings-card settings-collapsible" id="pm-collapsible" open>
+                            <summary class="settings-card-header settings-summary-header">
+                                <div class="settings-card-icon" style="background: rgba(245,158,11,0.1); color: var(--orange);">🗺️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">路径映射转发 (Path Mapping)</h3>
+                                    <p class="settings-card-desc">将 /mock/{path} 请求自动转发到真实目标地址</p>
+                                </div>
+                                <span class="settings-collapse-arrow">▾</span>
+                            </summary>
+                            <div class="settings-card-body" style="border-top: 1px solid var(--border); padding-top: 16px;">
+                                <div class="pm-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                                    <p class="pm-desc" style="color: var(--text-muted); font-size: 12px; margin: 0; line-height: 1.5; flex: 1;">
+                                        当 App 因 SDK 限制无法修改 Header 时，会把真实请求改写到 <code>/mock/{path}?...</code>。配置映射后，服务器会把匹配的 <code>/mock/sa</code> 转发到真实目标（如 <code>https://sc-sa.dramaboxdb.com/sa</code>），原 query 参数会自动拼接到真实 URL。
                                     </p>
+                                    <button class="btn-purple" onclick="openPathMappingEditor(-1)" style="flex-shrink: 0; margin-left: 16px; padding: 6px 14px; font-size: 12px;">＋ 新增映射</button>
                                 </div>
-                                <div
-                                    style="background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                                    <strong
-                                        style="color: var(--text); font-size: 12px; display: block; margin-bottom: 4px;">🚫
-                                        AP 隔离与 VPN 冲突</strong>
-                                    <p style="margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
-                                        <strong>网络隔离</strong>: 咖啡厅等公共 Wi-Fi 会隔离设备通信。<strong>终极解法：手机开热点给电脑连！</strong><br>
-                                        <strong>代理冲突</strong>: 手机需关闭 Clash、Shadowrocket 等可能接管流量的代理软件。
-                                    </p>
+                                <div id="path-mapping-list" class="pm-list"></div>
+                            </div>
+                        </details>
+
+                        <!-- ─── 区块 4: 排障指南 (可折叠，默认折叠) ─── -->
+                        <details class="settings-card settings-collapsible settings-card-warn" id="troubleshoot-collapsible">
+                            <summary class="settings-card-header settings-summary-header">
+                                <div class="settings-card-icon" style="background: rgba(239,68,68,0.1); color: var(--red);">⚠️</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">排障指南</h3>
+                                    <p class="settings-card-desc">连不上 / 网络请求一直超时？查看常见问题与解决方案</p>
+                                </div>
+                                <span class="settings-collapse-arrow">▾</span>
+                            </summary>
+                            <div class="settings-card-body" style="border-top: 1px solid var(--border); padding-top: 16px;">
+                                <div class="settings-troubleshoot-grid">
+                                    <div class="settings-troubleshoot-item">
+                                        <span class="settings-troubleshoot-icon">🔒</span>
+                                        <div>
+                                            <strong>系统防火墙拦截</strong>
+                                            <p><strong>Mac</strong>: 系统设置 → 网络 → 防火墙 → 选项，确保 Python/Mock 服务允许传入连接。<br><strong>Win</strong>: 需在弹窗时勾选专用和公用网络允许传入。</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-troubleshoot-item">
+                                        <span class="settings-troubleshoot-icon">🚫</span>
+                                        <div>
+                                            <strong>AP 隔离与 VPN 冲突</strong>
+                                            <p><strong>网络隔离</strong>: 咖啡厅等公共 Wi-Fi 会隔离设备通信。<strong>终极解法：手机开热点给电脑连！</strong><br><strong>代理冲突</strong>: 手机需关闭 Clash、Shadowrocket 等可能接管流量的代理软件。</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        </details>
 
                     </div>
                 </div>
