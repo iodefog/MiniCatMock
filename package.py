@@ -6,6 +6,24 @@ for env_key in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_P
 import sys
 import shutil
 import subprocess
+import re
+
+
+def _get_app_version():
+    """从 server.py 读取 APP_VERSION，作为唯一版本源"""
+    try:
+        with open("server.py", "r", encoding="utf-8") as f:
+            content = f.read()
+        m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', content)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "1.0.0"
+
+
+_APP_VERSION = _get_app_version()
+_APP_VERSION_SHORT = ".".join(_APP_VERSION.split(".")[:2])  # major.minor
 
 def clean_builds():
     print("🧹 Cleaning up old build artifacts...")
@@ -156,7 +174,7 @@ def package():
         os.makedirs(res_dir, exist_ok=True)
 
         # ── 写入 Info.plist ──
-        info_plist = """\
+        info_plist = f"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -168,8 +186,10 @@ def package():
     <string>小猫Mock</string>
     <key>CFBundleIdentifier</key>
     <string>com.xiaomaomock.server</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{_APP_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>{_APP_VERSION_SHORT}</string>
     <key>CFBundleIconFile</key>
     <string>icon.icns</string>
     <key>CFBundleExecutable</key>
@@ -224,8 +244,24 @@ fi
         if os.path.exists(icon_src):
             shutil.copy(icon_src, os.path.join(res_dir, "icon.icns"))
 
+        # ── Ad-hoc 代码签名（减少 macOS Gatekeeper 阻拦）──
+        # 没有 Apple Developer 证书时用 ad-hoc (-) 签名，
+        # 虽然不是完全消除提示，但能保证签名结构完整，
+        # 用户首次打开时右键 → 打开 即可正常使用。
+        print("🔐 Signing app bundle with ad-hoc signature...")
+        try:
+            subprocess.run(
+                ["codesign", "--force", "--deep", "--sign", "-", app_path],
+                check=True, timeout=60,
+            )
+            print("✅ Ad-hoc code signing completed.")
+        except Exception as e:
+            print(f"⚠️  Code signing failed (non-fatal): {e}")
+
         print(f"📂 macOS App bundle generated at: {app_path}")
         print("👉 Double-click '小猫Mock.app' to start the server.")
+        print("💡 首次打开若被拦截：右键 → 打开，或执行：")
+        print(f"   xattr -cr {app_path}")
 
     else:
         executable_name = "小猫Mock.exe"

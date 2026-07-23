@@ -25,6 +25,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+APP_VERSION = "1.1.0"
+
 app = FastAPI(title="🐱 小猫Mock - 局域网 Mock & 抓包服务器")
 
 # 前端 JS 已按模块拆分为多个文件，运行时按此顺序注入模板占位符。
@@ -712,6 +714,8 @@ async def get_index():
         except FileNotFoundError:
             _js_part = ""
         content = content.replace(_placeholder, _js_part)
+    # 统一注入应用版本号
+    content = content.replace("{{APP_VERSION}}", f"v{APP_VERSION}")
     return Response(
         content=content,
         media_type="text/html",
@@ -757,6 +761,8 @@ async def get_index_en():
         except FileNotFoundError:
             _js_part = ""
         content = content.replace(_placeholder, _js_part)
+    # 统一注入应用版本号
+    content = content.replace("{{APP_VERSION}}", f"v{APP_VERSION}")
     return Response(
         content=content,
         media_type="text/html",

@@ -1,7 +1,7 @@
 // ─── 检查版本更新 ───
 async function checkForUpdates() {
     try {
-        const CURRENT_VERSION = "v1.0.0";
+        const CURRENT_VERSION = "{{APP_VERSION}}";
         // 从 Cloudflare 获取最新版本信息
         const response = await fetch('https://my-mini-mock.lihongli528628.workers.dev/api/version');
         if (response.ok) {
