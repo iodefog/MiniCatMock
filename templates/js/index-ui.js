@@ -249,6 +249,72 @@
             }
         }
 
+        function toggleEditorFullscreen() {
+            const group = document.querySelector('.body-editor-group');
+            const badge = document.querySelector('.badge-expand');
+            if (!group || !badge) return;
+
+            const isFullscreen = !group.classList.contains('editor-fullscreen');
+
+            if (isFullscreen) {
+                // 进入全屏：将编辑器挂到 body 下，避免被 drawer 的 z-index 遮挡
+                window._editorFullscreenParent = group.parentNode;
+                window._editorFullscreenNext = group.nextSibling;
+                document.body.appendChild(group);
+                group.classList.add('editor-fullscreen');
+                document.body.classList.add('has-fullscreen-editor');
+
+                // 注入底部操作栏（保存 + 退出）
+                let toolbar = document.getElementById('fullscreen-editor-toolbar');
+                if (!toolbar) {
+                    toolbar = document.createElement('div');
+                    toolbar.id = 'fullscreen-editor-toolbar';
+                    toolbar.innerHTML = `
+                        <button id="btn-fullscreen-save" onclick="saveRule();toggleEditorFullscreen()">💾 保存并退出</button>
+                        <button id="btn-fullscreen-exit" onclick="toggleEditorFullscreen()">✕ 退出全屏</button>
+                    `;
+                    document.body.appendChild(toolbar);
+                }
+                toolbar.style.display = 'flex';
+
+                badge.innerHTML = '✕ 退出';
+                badge.title = '退出全屏编辑';
+
+                const bodyEl = document.getElementById('rule-body');
+                if (bodyEl) setTimeout(() => bodyEl.focus(), 100);
+
+                window._editorFullscreenEscHandler = (e) => {
+                    if (e.key === 'Escape') toggleEditorFullscreen();
+                };
+                document.addEventListener('keydown', window._editorFullscreenEscHandler);
+            } else {
+                // 退出全屏：还原编辑器位置
+                group.classList.remove('editor-fullscreen');
+                document.body.classList.remove('has-fullscreen-editor');
+
+                const parent = window._editorFullscreenParent;
+                const next = window._editorFullscreenNext;
+                if (parent) {
+                    if (next) {
+                        parent.insertBefore(group, next);
+                    } else {
+                        parent.appendChild(group);
+                    }
+                }
+
+                const toolbar = document.getElementById('fullscreen-editor-toolbar');
+                if (toolbar) toolbar.style.display = 'none';
+
+                badge.innerHTML = '⤢ 全屏编辑';
+                badge.title = '全屏沉浸编辑';
+
+                if (window._editorFullscreenEscHandler) {
+                    document.removeEventListener('keydown', window._editorFullscreenEscHandler);
+                    window._editorFullscreenEscHandler = null;
+                }
+            }
+        }
+
         function copyMockJson() {
             const rawText = document.getElementById('rule-body').value;
             if (!rawText.trim()) {
@@ -306,13 +372,14 @@
             const btn = document.getElementById('btn-toggle-service');
             const dot = document.querySelector('.status-dot-badge .dot');
             const text = document.getElementById('mock-status-dot-badge');
+            const isZh = (typeof currentLang === 'undefined' || currentLang === 'zh');
 
             if (btn) {
                 if (enabled) {
-                    btn.innerText = 'ON';
+                    btn.innerText = isZh ? 'Mock开启' : 'Mock ON';
                     btn.classList.add('active');
                 } else {
-                    btn.innerText = 'OFF';
+                    btn.innerText = isZh ? 'Mock关闭' : 'Mock OFF';
                     btn.classList.remove('active');
                 }
             }

@@ -21,7 +21,7 @@ function selectLog(element, logId) {
 
     // 显示详情视图并隐藏空状态
     document.getElementById('no-selection-state').style.display = 'none';
-    document.getElementById('details-layout').style.display = 'grid';
+    document.getElementById('details-layout').style.display = 'flex';
     const selState = document.getElementById('selection-state');
     if(selState) selState.style.display = 'flex';
 
@@ -553,7 +553,7 @@ function loadRuleToConfig(rule) {
     switchTab('request-tab', document.querySelector('.tab-btn:first-child'));
 
     document.getElementById('no-selection-state').style.display = 'none';
-    document.getElementById('details-layout').style.display = 'grid';
+    document.getElementById('details-layout').style.display = 'flex';
     const selState = document.getElementById('selection-state');
     if(selState) selState.style.display = 'flex';
 

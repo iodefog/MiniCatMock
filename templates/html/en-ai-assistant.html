@@ -3,9 +3,6 @@
                 <div class="drawer-header" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white;">
                     <h3 style="color: white; margin: 0; font-size: 16px;">✨ AI Mock Assistant</h3>
                     <div class="drawer-header-actions">
-                        <span class="status-dot-badge" style="background: rgba(255,255,255,0.2); color: white; border: none;">
-                            <span class="dot active" style="background: #10b981;"></span> Ready
-                        </span>
                         <button class="btn-drawer-close" onclick="closeAIDrawer()" style="color: white; opacity: 0.8;">✕</button>
                     </div>
                 </div>
@@ -17,21 +14,11 @@
                                     <div class="ai-assistant-title">
                                         <span class="ai-icon">✨</span> <span>Conversational AI</span>
                                     </div>
-                                    <div class="ai-status-indicator">
-                                        <span class="pulse-dot"></span> Ready
-                                    </div>
                                 </div>
                                 
                                 <div class="ai-chat-container">
-                                    <div style="display:flex; gap:8px; margin-bottom:10px;">
-                                        <select id="ai-nl-method" style="background: var(--surface2); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 10px; font-size:12px; outline:none; cursor:pointer;">
-                                            <option>GET</option>
-                                            <option selected>POST</option>
-                                            <option>PUT</option>
-                                            <option>DELETE</option>
-                                            <option>PATCH</option>
-                                        </select>
-                                        <input type="text" id="ai-nl-path" placeholder="Endpoint path, e.g. /drama-box/sf001/list" style="flex:1; background: var(--surface2); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 12px; font-size:12px; outline:none; font-family:monospace;" />
+                                    <div style="margin-bottom:10px;">
+                                        <input type="text" id="ai-nl-path" placeholder="Endpoint path, e.g. /drama-box/sf001/list" style="width:100%; background: var(--surface2); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 12px; font-size:12px; outline:none; font-family:monospace;" />
                                     </div>
                                     <div class="ai-quick-chips">
                                         <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('generate','ai-nl-rule-input')" >🪄 Auto Generate</button>

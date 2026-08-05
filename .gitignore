@@ -3,4 +3,8 @@ dist/**
 dist_win/**
 dist_mac/**
 __pycache__/**
+
+bin/**
+
 mock_data/**
+小猫Mock.spec

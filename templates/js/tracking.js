@@ -18,6 +18,20 @@ let trackingRecordingTimer = null; // 录制时长显示定时器
 
 const TRACKING_TYPE_OPTIONS = ["", "string", "number", "bool"];
 
+// ─── 更新埋点 Tab 上的规则计数徽章 ───
+function updateTrackingTabCount() {
+    const badge = document.getElementById('tracking-tab-count');
+    if (!badge) return;
+    const count = trackingRulesCache.length;
+    if (count > 0) {
+        badge.style.display = 'inline-flex';
+        badge.textContent = count > 99 ? '99+' : count;
+    } else {
+        badge.style.display = 'none';
+        badge.textContent = '0';
+    }
+}
+
 // ─── 初始化面板（每次切到该 tab 调用）───
 async function initTrackingPanel() {
     await Promise.all([loadTrackingRules(), loadTrackingSources()]);
@@ -43,6 +57,7 @@ async function loadTrackingRules() {
     } catch (e) {
         trackingRulesCache = [];
     }
+    updateTrackingTabCount();
 }
 
 async function loadTrackingSources() {
@@ -469,6 +484,7 @@ async function saveTrackingRule(rid) {
         });
         if (res.ok) {
             trackingRulesCache = existing;
+            updateTrackingTabCount();
             closeTopModal();
             await refreshTrackingResults();
         }
@@ -485,6 +501,7 @@ async function deleteTrackingRule(rid) {
             body: JSON.stringify({ rules: existing })
         });
         trackingRulesCache = existing;
+        updateTrackingTabCount();
         await refreshTrackingResults();
     } catch (e) {}
 }
@@ -599,6 +616,7 @@ async function applyTrackingImport(textOverride) {
             body: JSON.stringify({ rules: merged })
         });
         trackingRulesCache = merged;
+        updateTrackingTabCount();
         closeTopModal();
         await refreshTrackingResults();
         return true;
@@ -830,6 +848,7 @@ async function clearTrackingRules() {
         const res = await fetch('/api/tracking/clear', { method: 'POST' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         trackingRulesCache = [];
+        updateTrackingTabCount();
         await refreshTrackingResults();
         showToast('🗑️ 埋点列表已清空');
     } catch (e) {

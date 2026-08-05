@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 app = FastAPI(title="🐱 小猫Mock - 局域网 Mock & 抓包服务器")
 

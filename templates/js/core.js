@@ -191,8 +191,8 @@ async function toggleGlobalMock(enabled) {
     }
 }
 
-// 每隔3秒自动刷新一次抓包日志
-setInterval(loadLogs, 3000);
+// 每隔3秒增量刷新抓包日志（仅追加新条目）
+setInterval(incrementalLoadLogs, 3000);
 
 // 每隔6秒自动刷新一次全局在线/注册用户及抓包累积量统计
 setInterval(loadTelemetryStats, 6000);
@@ -234,10 +234,9 @@ let currentSubTab = 'dashboard';
 function switchSubTab(mode) {
     currentSubTab = mode;
     
-    // 切换顶栏按钮 active 样式（mode -> 中文标签映射）
-    const SUBTAB_LABELS = { dashboard: '数据概览', logs: '实时日志', analytics: '流量分析', tracking: '埋点校验' };
+    // 切换顶栏按钮 active 样式（通过 data-subtab 属性匹配）
     document.querySelectorAll('.middle-subtabs .subtab').forEach(tab => {
-        if (tab.innerText.trim() === (SUBTAB_LABELS[mode] || mode)) {
+        if (tab.getAttribute('data-subtab') === mode) {
             tab.classList.add('active');
         } else {
             tab.classList.remove('active');
@@ -262,7 +261,7 @@ function switchSubTab(mode) {
     if (mode === 'dashboard') {
         if (currentSelectedLogId) {
             if (selState) selState.style.display = 'flex';
-            if (details) details.style.display = 'grid';
+            if (details) details.style.display = 'flex';
         } else {
             if (noSelect) noSelect.style.display = 'flex';
         }

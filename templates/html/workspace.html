@@ -6,16 +6,21 @@
                 <div class="middle-header">
                     <h2 class="middle-title">抓包列表</h2>
                     <div class="middle-subtabs">
-                        <span class="subtab active" onclick="switchSubTab('dashboard')">数据概览</span>
-                        <span class="subtab" onclick="switchSubTab('logs')">实时日志</span>
-                        <span class="subtab" onclick="switchSubTab('analytics')">流量分析</span>
-                        <span class="subtab" onclick="switchSubTab('tracking')">埋点校验</span>
+                        <span class="subtab active" data-subtab="dashboard" onclick="switchSubTab('dashboard')">数据概览</span>
+                        <span class="subtab" data-subtab="logs" onclick="switchSubTab('logs')">实时日志</span>
+                        <span class="subtab" data-subtab="analytics" onclick="switchSubTab('analytics')">流量分析</span>
+                        <span class="subtab tracking-subtab" data-subtab="tracking" onclick="switchSubTab('tracking')">
+                            埋点校验
+                            <span class="tab-new-badge" title="新功能推荐">✦ NEW</span>
+                            <span class="tab-count-badge" id="tracking-tab-count" style="display: none;">0</span>
+                        </span>
                     </div>
                     <div class="middle-actions">
                         <button class="btn-refresh" onclick="loadLogs()" title="Refresh" data-i18n-title="refresh_btn"
                             style="padding: 6px 8px;">🔄 <span>刷新</span></button>
                         <button class="btn-toggle-service active" onclick="toggleServiceButton()"
-                            id="btn-toggle-service">ON</button>
+                            id="btn-toggle-service">Mock开启</button>
+                        <button class="btn-ai-entry" onclick="openAIDrawer()" title="AI Mock 配置" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(126, 34, 206, 0.2);">✨ 唤起 AI 助手面板</button>
                     </div>
                 </div>
 
@@ -30,8 +35,7 @@
                         <button class="filter-btn" onclick="setLogFilter('GET', this)">GET</button>
                         <button class="filter-btn" onclick="setLogFilter('POST', this)">POST</button>
                         <button class="filter-btn" onclick="setLogFilter('mocked', this)">MOCK</button>
-                        <button class="filter-btn" onclick="setLogFilter('missed', this)" data-i18n="filter_missed">透传</button>
-                        <button class="filter-btn" onclick="setLogFilter('error', this)">异常</button>
+                        <button class="filter-btn" onclick="setLogFilter('error', this)">异常接口</button>
                         <div class="filter-toggle-wrap">
                             <button class="filter-toggle-btn active" id="filter-logs-toggle" onclick="onFilterToggleClick()" ondblclick="openLogFilterManager()" title="单击：过滤根路径「/」请求；双击：管理路径过滤（/sa、/ioslog 等）">
                                 <span class="filter-toggle-dot"></span>
@@ -86,34 +90,11 @@
                             </span>
                         </div>
 
-                        <!-- Stats Grid -->
-                        <div class="insights-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;" data-i18n="stat_intercepted">已拦截请求</div>
-                                <div class="stat-value" style="font-size: 24px; font-weight: 700; color: var(--text);">1,204</div>
-                                <div class="stat-trend text-green" style="font-size: 10px; margin-top: 4px; font-weight: 500;">今日 +12%</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--purple); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;" data-i18n="stat_hit_rate">Mock 命中率</div>
-                                <div class="stat-value text-purple" style="font-size: 24px; font-weight: 700;">85.2%</div>
-                                <div class="stat-trend text-muted" style="font-size: 10px; margin-top: 4px; font-weight: 500;" data-i18n="stat_hit_rate_desc">接口平均命中率</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--accent); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;" data-i18n="stat_ai_generated">AI 辅助生成</div>
-                                <div class="stat-value text-blue" style="font-size: 24px; font-weight: 700;">342</div>
-                                <div class="stat-trend text-green" style="font-size: 10px; margin-top: 4px; font-weight: 500;" data-i18n="stat_ai_gen_desc">高效率生成</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--orange); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;" data-i18n="stat_active_rules">生效中规则</div>
-                                <div class="stat-value text-orange" style="font-size: 24px; font-weight: 700;">45</div>
-                                <div class="stat-trend text-muted" style="font-size: 10px; margin-top: 4px; font-weight: 500;" data-i18n="stat_active_rules_desc">近期更新了 3 条</div>
-                            </div>
-                        </div>
 
                         <!-- Main Grid -->
                         <div class="insights-main-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
                             
-                            <!-- Global AI Assistant Panel (AI 实验室) -->
+                            <!-- Global AI Mock 配置助手 -->
                             <div class="insight-card ai-assistant-panel" style="grid-column: span 2; background: linear-gradient(135deg, rgba(168, 85, 247, 0.04) 0%, rgba(59, 130, 246, 0.04) 100%); border-radius: 16px; border: 1px solid rgba(168, 85, 247, 0.15); padding: 20px; position: relative; overflow: hidden; box-shadow: 0 8px 32px rgba(168, 85, 247, 0.04);">
                                 <div style="position: absolute; top: -50px; right: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%); pointer-events: none;"></div>
                                 
@@ -121,26 +102,16 @@
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span style="font-size: 20px;">🔮</span>
                                         <div>
-                                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text);" data-i18n="ai_lab_title">小猫 AI 实验室 (AI Laboratory)</h3>
+                                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text);" data-i18n="ai_lab_title">✨ AI Mock 配置助手</h3>
                                             <p style="margin: 2px 0 0 0; font-size: 11px; color: var(--text-muted);" data-i18n="ai_lab_subtitle">免抓包！用自然语言快速设计并部署全新的 Mock 规则</p>
                                         </div>
                                     </div>
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span id="global-ai-status-badge" class="ai-provider-tag tag-deepseek" style="cursor: pointer;" onclick="openAISettings()">DeepSeek ⚙️</span>
+                                        <span id="global-ai-status-badge" class="ai-provider-tag tag-deepseek" style="cursor: pointer;" onclick="openAISettings()"> DeepSeek ⚙️</span>
                                     </div>
                                 </div>
 
                                 <div style="display: flex; flex-direction: column; gap: 12px;">
-                                    <div style="display: flex; gap: 8px;">
-                                        <select id="global-ai-method" style="background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600; cursor: pointer; outline: none;">
-                                            <option value="GET">GET</option>
-                                            <option value="POST" selected>POST</option>
-                                            <option value="PUT">PUT</option>
-                                            <option value="DELETE">DELETE</option>
-                                            <option value="PATCH">PATCH</option>
-                                        </select>
-                                        <input type="text" id="global-ai-path" placeholder="/api/v1/user/profile" style="flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 12px; outline: none; font-family: monospace;" />
-                                    </div>
 
                                     <div class="ai-quick-chips" style="margin-bottom: 2px;">
                                         <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('generate','global-ai-prompt')" data-i18n="ai_chip_generate">🪄 一键生成数据</button>
@@ -356,12 +327,9 @@
                         </div>
                     </div>
 
-                    <div id="details-layout" class="details-full" style="display: none; height: 100%;">
+                    <div id="details-layout" class="details-full" style="display: none; max-height: 100%;">
                         <div class="middle-header" style="display: flex !important; flex-direction: row !important; justify-content: flex-start !important; align-items: center !important; padding: 14px 20px !important; border-bottom: none !important;">
                             <h2 class="middle-title">请求详情查看</h2>
-                            <div class="middle-actions">
-                                <button class="btn-ai-entry" onclick="openAIDrawer()" title="AI Mock Config" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(126, 34, 206, 0.2);" >✨ 唤起 AI 助手面板</button>
-                            </div>
                         </div>
                         <!-- Column 3: Client Request Details -->
                         <div class="detail-block" style="margin-top: 14px;">
@@ -369,10 +337,8 @@
                                 <button class="details-tab active" onclick="switchDetailsSubTab('response')">响应详情 (RESPONSE)</button>
                                 <button class="details-tab" onclick="switchDetailsSubTab('request')">请求详情 (REQUEST)</button>
                                 <button class="details-tab" onclick="switchDetailsSubTab('composer')">cURL 发送</button>
-                                <button class="btn-config-mock" onclick="openMockDrawer()" title="打开 Mock 配置抽屉" style="margin-left:auto; background: var(--surface2); color: var(--text); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; border: 1px solid var(--border); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">⚙️ 配置 Mock</button>
-                                <button class="btn-config-mock" onclick="openPathMappingManager()" title="配置 /sa 等路径映射转发" style="background: var(--surface2); color: var(--text); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; border: 1px solid var(--border); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">🗺️ 路径映射</button>
-                                <button class="btn-copy-req" onclick="copyText('inspect-req-url')" title="复制完整URL">📋
-                                    复制 URL</button>
+                                <button class="btn-config-mock btn-mock-highlight" onclick="openMockDrawer()" title="一键配置 Mock 响应，支持可视化编辑与 AI 生成" style="margin-left:auto;">⚡ 配置 Mock</button>
+                                <button class="btn-config-mock" onclick="openPathMappingManager()" title="配置 /sa 等Url重定向" style="background: var(--surface2); color: var(--text); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; border: 1px solid var(--border); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">🗺️ Url重定向</button>
                             </div>
 
                             <!-- Request Subtab -->
@@ -396,15 +362,15 @@
                             <!-- Response Subtab -->
                             <div class="details-subtab-content" id="details-response-content">
                                 <div class="section-label-group">
-                                    <span class="section-label">RESPONSE TYPE</span>
+                                    <span class="section-label">响应类型</span>
                                     <span id="response-status-badge" class="mock-badge">200 OK</span>
                                 </div>
-                                <div class="section-label" style="margin-top: 6px;">RESPONSE HEADERS</div>
+                                <div class="section-label" style="margin-top: 6px;">响应头</div>
                                 <pre class="code-box" id="inspect-resp-headers">{}</pre>
 
                                 <div class="section-label-group"
                                     style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span class="section-label">RESPONSE BODY</span>
+                                    <span class="section-label">响应体</span>
                                 </div>
                                 <div class="response-body-wrapper" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
                                     <pre class="code-box-large" id="inspect-response" style="flex: 1; min-height: 0; max-height: none; overflow: auto;">{}</pre>
@@ -427,16 +393,16 @@
                                         style="flex: 1; padding: 8px 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: monospace; font-size: 12px;">
                                 </div>
 
-                                <div class="section-label" data-i18n="lbl_query_params">QUERY PARAMETERS (JSON 格式)</div>
+                                <div class="section-label" data-i18n="lbl_query_params">请求参数 (JSON 格式)</div>
                                 <textarea id="composer-query" placeholder='{"key": "value"}'
                                     style="width: 100%; height: 100px; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 10px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface2); color: var(--text); resize: vertical;"></textarea>
 
-                                <div class="section-label" data-i18n="lbl_request_headers">REQUEST HEADERS (JSON 格式)</div>
+                                <div class="section-label" data-i18n="lbl_request_headers">请求头 (JSON 格式)</div>
                                 <textarea id="composer-headers"
                                     placeholder='{"Content-Type": "application/json", "Authorization": "Bearer token"}'
                                     style="width: 100%; height: 160px; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 10px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface2); color: var(--text); resize: vertical;"></textarea>
 
-                                <div class="section-label" data-i18n="lbl_request_body">REQUEST BODY (文本/JSON 格式)</div>
+                                <div class="section-label" data-i18n="lbl_request_body">请求体 (文本/JSON 格式)</div>
                                 <textarea id="composer-body" placeholder='{"param1": "value1"}'
                                     style="width: 100%; height: 200px; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 10px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface2); color: var(--text); resize: vertical;"></textarea>
 
@@ -452,13 +418,13 @@
 
                                 <div class="composer-response-section" id="composer-response-area"
                                     style="display: none; flex-direction: column; gap: 10px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 12px;">
-                                    <div class="section-label">RESPONSE HEADERS</div>
+                                    <div class="section-label">响应头</div>
                                     <pre class="code-box" id="composer-resp-headers"
                                         style="max-height: 120px; overflow-y: auto; font-size: 10px;"></pre>
 
                                     <div class="section-label-group"
                                         style="display: flex; justify-content: space-between; align-items: center;">
-                                        <span class="section-label">RESPONSE BODY</span>
+                                        <span class="section-label">响应体</span>
                                         <button class="btn-secondary" onclick="fillComposerResponseToMock()"
                                             style="padding: 2px 8px; font-size: 11px; background: var(--green-light); color: var(--green); border-color: rgba(16, 185, 129, 0.1); cursor: pointer;">🎯
                                             回填至 Mock 规则</button>
@@ -480,7 +446,7 @@
             <!-- ─── Drawer: Mock Details & Config ─── -->
             <div id="mock-config-drawer" class="mock-drawer">
                 <div class="drawer-header">
-                    <h3>🎛️ Mock Configuration</h3>
+                    <h3>🎛️ Mock数据配置面板</h3>
                     <div class="drawer-header-actions">
                         <span class="status-dot-badge" id="mock-status-dot-badge">
                             <span class="dot active"></span> Mock Active
@@ -505,11 +471,11 @@
                         <div class="rule-form-container">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Folder Category</label>
+                                    <label>文件夹</label>
                                     <input type="text" id="rule-folder" placeholder="Uncategorized">
                                 </div>
                                 <div class="form-group">
-                                    <label>Rule Name</label>
+                                    <label>规则名称</label>
                                     <input type="text" id="rule-name" placeholder="Capture Rule_611">
                                 </div>
                             </div>
@@ -526,14 +492,14 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Status Code</label>
+                                    <label>状态码</label>
                                     <input type="number" id="rule-status" value="200">
                                 </div>
                             </div>
 
                             <div class="form-group slider-group">
                                 <div class="slider-header">
-                                    <label>Response Delay (ms)</label>
+                                    <label>延迟响应 (ms)</label>
                                     <span class="slider-value-tooltip" id="delay-tooltip">0ms</span>
                                 </div>
                                 <div class="slider-container">
@@ -556,23 +522,22 @@
                             </div>
 
                             <div class="form-group">
-                                <label>Matching Path</label>
+                                <label>匹配 Path</label>
                                 <input type="text" id="rule-pattern" placeholder="/api/v2/chat/stream?session_id=*">
                             </div>
 
                             <div class="form-group">
-                                <label>Matching Params (Optional)</label>
+                                <label>参数强匹配(可选)</label>
                                 <input type="text" id="rule-match-params"
                                     placeholder='name=124&type=1 或 {"name":"124"}'>
                             </div>
 
                             <div class="form-group body-editor-group">
                                 <div class="editor-header">
-                                    <label>Mock Response Body</label>
+                                    <label>模拟响应体</label>
                                     <div class="editor-badges">
-                                        <span class="badge-smart-ai">SMART AI</span>
-                                        <span class="badge-format" onclick="formatMockJson()">FORMAT</span>
-                                        <span class="badge-expand" onclick="toggleEditorFullscreen()" title="全屏沉浸编辑">⤢ MAX</span>
+                                        <span class="badge-format" onclick="formatMockJson()">格式化JSON</span>
+                                        <span class="badge-expand" onclick="toggleEditorFullscreen()" title="全屏沉浸编辑">⤢ 全屏编辑</span>
                                     </div>
                                 </div>
 
@@ -582,13 +547,20 @@
                                     <button id="btn-edit-raw" class="toggle-btn"
                                         onclick="switchEditorMode('raw')">📝 源码文本</button>
                                     <button class="btn-import-real" onclick="importRealResponse()"
-                                        title="Import real response captured from the left to editor">📥 导入真实响应</button>
+                                        title="Import real response captured from the left to editor">📥 导入请求原始数据</button>
+                                    <button class="btn-save-enable" onclick="saveRule()"
+                                        title="快速保存并启用当前 Mock 规则">💾 保存并启用</button>
                                 </div>
 
                                 <div class="ai-toolbar">
                                     <span class="ai-toolbar-label">✨ AI 助手:</span>
                                     <button class="btn-ai-tool" onclick="openAIGenerate()">🌟 智能生成</button>
                                     <button class="btn-ai-tool mutate" onclick="runAIMutate()">💥 异常变异</button>
+                                    <button class="btn-ai-tool overflow" onclick="runAIOverflow()">🌍 UI撑破</button>
+                                    <button class="btn-ai-tool token" onclick="runAITokenExpired()">🔐 Token失效</button>
+                                    <button class="btn-ai-tool reverse" onclick="runAIReverse()">🔀 数据倒序</button>
+                                    <button class="btn-ai-tool modify" onclick="runAIModify()">✏️ 改/增字段</button>
+                                    <button class="btn-ai-tool related" onclick="runAIGenRelated()">🧩 参考生成</button>
                                     <button class="btn-ai-tool repair" onclick="runAIRepair()">🔧 语法修复</button>
                                     <button class="btn-ai-tool model" onclick="openAIModelGen()">📱 导出代码</button>
                                 </div>
@@ -653,10 +625,6 @@
                                 <button class="btn-settings-action" onclick="toggleTheme()" title="切换明暗主题">
                                     <span>🌓</span>
                                     <span data-i18n="btn_toggle_theme">切换主题</span>
-                                </button>
-                                <button class="btn-settings-action" onclick="toggleLanguage()" title="切换中英文">
-                                    <span>🌍</span>
-                                    <span data-i18n="btn_toggle_lang">EN/中</span>
                                 </button>
                             </div>
                         </div>
@@ -755,6 +723,45 @@
                                                 <span>连接成功后，在 App 内开启<strong>「启用 Mock 转发」</strong>开关，所有客户端发出的请求即可在左侧列表实时捕获推送！</span>
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ─── 区块 2.5: HTTP/3 域名反向代理 ─── -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: rgba(56,189,248,0.1); color: #38bdf8;">🚀</div>
+                                <div class="settings-card-title-group">
+                                    <h3 class="settings-card-title">HTTP/3 域名代理 (Caddy)</h3>
+                                    <p class="settings-card-desc">用自定义域名暴露服务，原生支持 HTTP/3(QUIC)，抓包列表正确显示协议版本</p>
+                                </div>
+                            </div>
+                            <div class="settings-card-body" style="display: flex; flex-direction: column; gap: 14px;">
+                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+                                    将域名（如 <code>yfbapih3.dramaboxapp.com</code>）的 DNS <b>A 记录</b>指向本机公网 IP，并确保防火墙放行
+                                    <b>80 / 443</b> 端口（含 UDP 443）。Caddy 会自动申请并续期 HTTPS 证书。
+                                </div>
+                                <div id="h3-suggest-banner" class="settings-warning-card" style="display:none; border-left-color: var(--purple); background: rgba(139,92,246,0.04);">
+                                    <span class="settings-warning-icon">💡</span>
+                                    <div class="settings-warning-body">
+                                        检测到客户端正在请求域名 <strong class="h3-suggest-domain">—</strong>，
+                                        点击「启用代理」即可用该域名暴露服务并支持 HTTP/3。
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                    <input type="text" id="h3-domain-input" placeholder="输入自定义域名，例如 yfbapih3.dramaboxapp.com"
+                                        style="flex: 1; min-width: 220px; padding: 9px 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: monospace; font-size: 12px; outline: none;">
+                                    <button class="btn-purple" id="btn-h3-enable" onclick="startH3Proxy()">🚀 启用代理</button>
+                                    <button class="btn-settings-action" id="btn-h3-disable" onclick="stopH3Proxy()" style="display:none;">⏹ 停用</button>
+                                </div>
+                                <div id="h3-status-badge" class="tunnel-status-badge-inline" style="display:none;">⏳ 正在初始化...</div>
+                                <span id="h3-url-copy-btn" style="display:none; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="copyH3Url()">📋 复制访问地址</span>
+                                <div id="h3-binary-warning" class="settings-warning-card" style="display:none; border-left-color: var(--orange); background: rgba(245,158,11,0.04);">
+                                    <span class="settings-warning-icon">⚠️</span>
+                                    <div class="settings-warning-body">
+                                        <strong>未检测到内置 Caddy 二进制</strong>
+                                        <p style="margin: 6px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6;">请先运行 <code>python3 download_caddy.py</code> 下载 Caddy，或重新打包应用。</p>
                                     </div>
                                 </div>
                             </div>

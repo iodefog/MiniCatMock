@@ -590,6 +590,32 @@ async function loadLogs() {
     } catch (e) { }
 }
 
+// ─── 增量刷新抓包列表（仅追加新条目，用于自动轮询）───
+async function incrementalLoadLogs() {
+    try {
+        const res = await fetch('/api/logs');
+        const logs = await res.json();
+
+        // 首次加载，全量写入
+        if (!window.allCapturedLogs || window.allCapturedLogs.length === 0) {
+            window.allCapturedLogs = logs;
+            renderFilteredLogs();
+            return;
+        }
+
+        // 找新条目（日志按最新在前排列）
+        const existingIds = new Set(window.allCapturedLogs.map(l => l.id));
+        const newLogs = logs.filter(l => !existingIds.has(l.id));
+        if (newLogs.length === 0) return; // 无新增，不动 DOM
+
+        // 有新增，追加到头部
+        window.allCapturedLogs = [...newLogs, ...window.allCapturedLogs];
+
+        // 重绘列表（renderFilteredLogs 内部已通过 currentSelectedLogId 保留 active 样式）
+        renderFilteredLogs();
+    } catch (e) { }
+}
+
 // ─── 设置过滤器类型 ───
 function setLogFilter(filterType, element) {
     window.currentLogFilter = filterType;
@@ -824,7 +850,7 @@ function renderFilteredLogs() {
                                 ${statusBadge}
                             </div>
                         </div>
-                        <div class="url-path">${displayPath}</div>
+                        <div class="url-path" onmousedown="event.stopPropagation()">${displayPath}</div>
                         ${finalQParamsStr}
                         <div class="log-footer">
                             <span>🕐 ${log.time}</span>

@@ -1,6 +1,119 @@
 // ─── AI 智能生成 JSON 功能模块 ───
 // ═══════════════════════════════════════════════════════════
 
+// ─── 共享 AI 提示词库（ai.js 编辑器模式 & pet.js AI助手 共用）───
+const SHARED_AI_PROMPTS = {
+    generate: {
+        zh: '请为当前接口一键生成一个完整、真实可信的 Mock 数据集：包含 id、名称、头像 URL、状态、创建时间等常见字段，以数组形式返回 10 条，外层统一包裹为 {"code": 200, "message": "success", "data": {"list": [...], "total": 10, "page": 1}}。',
+        en: 'Generate a complete, realistic Mock dataset for the current endpoint: include id, name, avatar URL, status, createdAt and other common fields, return an array of 10 items, wrapped as {"code": 200, "message": "success", "data": {"list": [...], "total": 10, "page": 1}}.'
+    },
+    boundary: {
+        zh: '请注入边界与脏数据测试用例：覆盖超长字符串、emoji 表情、特殊字符(<>&\'")、null、空字符串、空数组、负数、极大值与极小值、SQL 注入片段与脚本片段，用于验证接口健壮性。',
+        en: 'Inject boundary and dirty-data test cases: cover extra-long strings, emoji, special chars (<>&\'"), null, empty string, empty array, negative numbers, very large/small numbers, SQL injection and script snippets, to validate API robustness.'
+    },
+    multilang: {
+        zh: '请生成用于 UI 撑破测试的数据：超长标题与描述文本、超长列表(50+ 条)、深层嵌套对象(5 层以上)、超长字段名，验证前端渲染不崩溃、布局不溢出。',
+        en: 'Generate UI-stress-test data: extra-long title/description text, an extra-long list (50+ items), deeply nested objects (5+ levels), and very long field names, to verify the frontend does not crash and layout does not overflow.'
+    },
+    network: {
+        zh: '请为当前接口配置模拟弱网：固定响应延迟 3000ms，并叠加 ±500ms 随机抖动，模拟高延迟/不稳定网络场景。',
+        en: 'Configure simulated weak network for the current endpoint: fixed response latency 3000ms plus ±500ms random jitter, simulating high-latency / unstable network conditions.'
+    },
+    token: {
+        zh: '请模拟 Token 失效场景：当请求携带过期或无效 Token 时，返回 {"code": 401, "message": "Token expired or invalid"}，结构体与成功响应保持一致。',
+        en: 'Simulate token-expired scenario: when the request carries an expired or invalid token, return {"code": 401, "message": "Token expired or invalid"}, keeping the structure consistent with the success response.'
+    },
+    reverse: {
+        zh: '请将列表数据倒序排列（最新数据排在最前），并保持 total、page、pageSize 等分页字段完整且正确。',
+        en: 'Reverse the list order (newest items first) while keeping pagination fields like total, page, pageSize complete and correct.'
+    },
+    findParams: {
+        zh: '请帮我查找并汇总指定接口（如 xxx 接口）的完整契约信息：① 请求方法、URL 与全部请求参数（query / header / body 字段）；② 已保存或捕获到的请求示例数据；③ 当前返回结果的数据结构与字段说明。请以清晰清单逐项列出，便于我核对接口定义。',
+        en: 'Find and summarize the full contract of the specified endpoint (e.g. xxx): ① request method, URL and all request parameters (query / header / body fields); ② saved or captured example request data; ③ current response structure and field descriptions. List them as a clear checklist for verifying the API definition.'
+    },
+    modifyField: {
+        zh: '请帮我在指定接口（例如 xxx 接口）的返回数据中：把某字段的值修改为指定内容，或在某字段的同级位置下新增一个字段。请直接输出修改后的完整 JSON，并标注改动的具体路径（如 data.list[0].user.name）。',
+        en: 'For the specified endpoint (e.g. xxx), in its response data: change a given field value to the specified content, or add a new field next to a given field at the same level. Output the complete modified JSON and mark the changed paths (e.g. data.list[0].user.name).'
+    },
+    findLevel: {
+        zh: '请帮我在指定接口的返回数据中，定位某个字段位于第几层嵌套（最外层的 data 记为第 1 层），并给出从根节点到该字段的完整路径，方便我做数据提取或断言校验。',
+        en: 'In the specified endpoint response, locate at which nesting depth a given field sits (the outermost data counts as level 1), and give the full path from root to that field, so I can extract or assert on the data.'
+    },
+    genRelated: {
+        zh: '请参考指定接口或某段描述字段，自动生成一组相关/互补的接口（如配套的列表、详情、创建、更新、删除接口），保证字段命名、状态码与响应结构风格一致，并给出每个接口的请求方式与示例响应 JSON。',
+        en: 'Based on a reference endpoint or a description field, auto-generate a set of related/complementary endpoints (e.g. paired list, detail, create, update, delete), keeping field naming, status codes and response structure style consistent, and provide each endpoint method with example response JSON.'
+    },
+    replay: {
+        zh: '请通过 curl 重新请求当前接口（自动带上原始请求方法、URL、Header 与 Body），把真实线上响应完整回显给我，用于核对与抓包数据是否一致。',
+        en: 'Re-request the current endpoint via curl (auto-including the original method, URL, headers and body), and show me the complete real live response, so I can verify it against the captured data.'
+    },
+    // ── 编辑器模式专用 System Prompt（用于 runAIGenerate）──
+    system: {
+        jsonRules: `要求：
+1. 【最重要】默认情况下，你必须基于给定的原始数据（如果存在）进行修改或扩展，保留原始数据的结构和已知字段。
+2. 如果原始数据不为空且不是 JSON 格式，你必须严格保持原有的格式风格，绝对不能强制将其转换为标准的 JSON 对象或结构。
+3. 如果数据属于标准 JSON 格式，你输出的内容必须是合法的、可以直接被解析的纯 JSON 格式文本。绝对不能包含任何 Markdown 代码块标记（如 \`\`\`json），绝对不能包含任何解释性文字或对话。`,
+        generate: `你是一个专业的 Mock API 数据生成与修改助手。根据用户的描述，生成或修改并返回符合要求的数据。`,
+        mutate: `你是一个网络接口健壮性测试助手（混沌测试）。你的任务是根据给定的原始数据，生成包含各种极端异常情况、边界值、脏数据的异常变异数据，以帮助测试客户端应用程序的健壮性。`,
+        repair: `你是一个专业的数据语法修复工具。你的任务是尽全力修复给定的由于复制粘贴等原因引起的、格式损坏的数据，并输出符合对应标准格式规范的内容。`
+    }
+};
+
+// 获取共享提示词（按当前语言返回对应文本）
+function getSharedAIPrompt(actionKey) {
+    if (!SHARED_AI_PROMPTS[actionKey] || typeof SHARED_AI_PROMPTS[actionKey] === 'string') {
+        return SHARED_AI_PROMPTS[actionKey] || '';
+    }
+    const entry = SHARED_AI_PROMPTS[actionKey];
+    if (!entry.zh) return '';
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh';
+    return entry[lang] || entry.zh;
+}
+
+// 构建编辑器 AI 模态的 System Prompt（根据 mode 返回完整 systemPrompt）
+function buildEditorSystemPrompt(mode, isOriginalJson) {
+    const rules = SHARED_AI_PROMPTS.system.jsonRules;
+    const notJsonNote = `\n\n另外，当前编辑器中的原始数据${isOriginalJson ? '是' : '不是'}标准 JSON 格式，请根据上述规则 2/3 对应处理。`;
+
+    if (mode === 'generate') {
+        return `${SHARED_AI_PROMPTS.system.generate}\n${rules}
+4. 数字类型合理随机，字符串内容真实可信，不要使用敷衍的占位符。
+5. 如果原数据为空且用户没有指定其他的格式，默认外层结构为 {"code": 200, "message": "success", "data": ...}。${notJsonNote}`;
+    } else if (mode === 'mutate') {
+        const boundaryDesc = getSharedAIPrompt('boundary');
+        return `${SHARED_AI_PROMPTS.system.mutate}\n变异规则包括（随机组合使用）：${boundaryDesc}\n${rules}
+4. 输出必须保持与原始数据一致的格式风格（如原先是 JSON 字典则返回字典，原先是 SSE 文本流则返回 SSE 文本流）。${notJsonNote}`;
+    } else if (mode === 'repair') {
+        return `${SHARED_AI_PROMPTS.system.repair}\n修复指南：${rules}
+3. 如果原数据本就属于 JSON 格式，请补齐缺失的括号、双引号、单引号、冒号或逗号；将非法的单引号键值替换为标准双引号；剔除末尾多余的逗号，保证输出合法的、可以直接被解析的纯 JSON 格式文本。
+4. 绝对不能随意阉割或破坏核心数据，只做格式修复。输出必须保持与原始数据一致的格式和命名风格。${notJsonNote}`;
+    } else if (mode === 'overflow') {
+        const overflowDesc = getSharedAIPrompt('multilang');
+        return `${SHARED_AI_PROMPTS.system.generate}\n任务：${overflowDesc}\n${rules}
+4. 生成的超长列表每条数据必须结构一致、字段完整，不能出现截断或丢失字段的情况。${notJsonNote}`;
+    } else if (mode === 'tokenExpired') {
+        const tokenDesc = getSharedAIPrompt('token');
+        return `你是一个接口鉴权测试助手。\n任务：${tokenDesc}\n${rules}
+4. 如果原始数据存在成功响应的结构，请保持 code 之外的字段结构一致，仅将 code 改为 401 并修改 message。${notJsonNote}`;
+    } else if (mode === 'reverse') {
+        const reverseDesc = getSharedAIPrompt('reverse');
+        return `${SHARED_AI_PROMPTS.system.generate}\n任务：${reverseDesc}\n${rules}
+4. 如果数据中存在多个嵌套列表，请逐一倒序排列。
+5. 注意 total 应该是总数（不需要改），page 和 pageSize 保持不变。${notJsonNote}`;
+    } else if (mode === 'modify') {
+        const modifyDesc = getSharedAIPrompt('modifyField');
+        return `${SHARED_AI_PROMPTS.system.generate}\n任务：${modifyDesc}\n${rules}
+4. 请精准定位到用户指定的字段路径进行修改或新增，不能改动其他无关字段。
+5. 输出结果时需要标注改动路径，格式为 /** 改动: data.list[0].user.name */。${notJsonNote}`;
+    } else if (mode === 'genRelated') {
+        const relatedDesc = getSharedAIPrompt('genRelated');
+        return `${SHARED_AI_PROMPTS.system.generate}\n任务：${relatedDesc}\n${rules}
+4. 参考当前编辑器中已有接口的命名风格、字段类型和响应结构，生成配套接口时保持完全一致。
+5. 每个接口输出为独立 JSON 块，并标注接口说明和请求方式。${notJsonNote}`;
+    }
+    return '';
+}
+
 // 各服务商模型列表
 const AI_MODELS = {
     deepseek: ['deepseek-chat', 'deepseek-reasoner'],
@@ -212,6 +325,36 @@ function setupAIModal() {
         textareaEl.placeholder = '（可选）输入额外处理指令，例如：顺便把所有 key 的下划线改为驼峰命名';
         textareaEl.value = '';
         submitBtn.textContent = '🔧 开始修复';
+    } else if (aiMode === 'overflow') {
+        titleEl.innerHTML = `🌍 AI UI 撑破测试 <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>` + settingsBtnHtml;
+        subTitleEl.textContent = '基于当前数据生成超长文本、超长列表、深层嵌套等极端数据，验证前端渲染健壮性。';
+        textareaEl.placeholder = '（可选）指定撑破方向，例如：只拉长 name 字段、嵌套再加 3 层、列表扩展到 100 条';
+        textareaEl.value = '';
+        submitBtn.textContent = '🌍 生成撑破数据';
+    } else if (aiMode === 'tokenExpired') {
+        titleEl.innerHTML = `🔐 AI Token 失效模拟 <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>` + settingsBtnHtml;
+        subTitleEl.textContent = '将当前成功响应数据转换为 Token 过期/无效的错误响应，保持结构一致。';
+        textareaEl.placeholder = '（可选）自定义错误码和提示信息，例如：code 403、message "Forbidden"';
+        textareaEl.value = '';
+        submitBtn.textContent = '🔐 生成错误响应';
+    } else if (aiMode === 'reverse') {
+        titleEl.innerHTML = `🔀 AI 数据倒序 <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>` + settingsBtnHtml;
+        subTitleEl.textContent = '将当前数据中的所有列表倒序排列，自动保持分页字段完整。';
+        textareaEl.placeholder = '（可选）指定倒序范围，例如：只倒序 data.list、跳过 data.related';
+        textareaEl.value = '';
+        submitBtn.textContent = '🔀 开始倒序';
+    } else if (aiMode === 'modify') {
+        titleEl.innerHTML = `✏️ AI 改/增字段 <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>` + settingsBtnHtml;
+        subTitleEl.textContent = '修改指定字段的值或在同级位置新增字段，精准定位输出改动路径。';
+        textareaEl.placeholder = '例如：把 data.list 里所有 name 改为 "测试商品"，在 price 同级新增 discount 字段';
+        textareaEl.value = '';
+        submitBtn.textContent = '✏️ 开始修改';
+    } else if (aiMode === 'genRelated') {
+        titleEl.innerHTML = `🧩 AI 参考生成接口 <span id="ai-gen-provider-tag" class="ai-provider-tag tag-deepseek">DeepSeek</span>` + settingsBtnHtml;
+        subTitleEl.textContent = '参考当前接口结构，自动生成配套的列表、详情、创建、更新、删除等接口。';
+        textareaEl.placeholder = '（可选）指定需要生成的接口类型，例如：只要列表和详情两个接口';
+        textareaEl.value = '';
+        submitBtn.textContent = '🧩 生成配套接口';
     }
 
     // 更新弹窗 Provider 标签
@@ -259,6 +402,61 @@ function runAIRepair() {
         return;
     }
     aiMode = 'repair';
+    setupAIModal();
+}
+
+// ─── 触发 UI 撑破测试 ───
+function runAIOverflow() {
+    const originalJson = document.getElementById('rule-body').value.trim();
+    if (!originalJson) {
+        showToast('⚠️ 当前 Mock 编辑器内容为空，无法生成撑破测试数据！', '#f59e0b');
+        return;
+    }
+    aiMode = 'overflow';
+    setupAIModal();
+}
+
+// ─── 触发 Token 失效模拟 ───
+function runAITokenExpired() {
+    const originalJson = document.getElementById('rule-body').value.trim();
+    if (!originalJson) {
+        showToast('⚠️ 当前 Mock 编辑器内容为空，无法生成 Token 失效响应！', '#f59e0b');
+        return;
+    }
+    aiMode = 'tokenExpired';
+    setupAIModal();
+}
+
+// ─── 触发数据倒序 ───
+function runAIReverse() {
+    const originalJson = document.getElementById('rule-body').value.trim();
+    if (!originalJson) {
+        showToast('⚠️ 当前 Mock 编辑器内容为空，无法进行数据倒序！', '#f59e0b');
+        return;
+    }
+    aiMode = 'reverse';
+    setupAIModal();
+}
+
+// ─── 触发改/增字段 ───
+function runAIModify() {
+    const originalJson = document.getElementById('rule-body').value.trim();
+    if (!originalJson) {
+        showToast('⚠️ 当前 Mock 编辑器内容为空，无法修改字段！', '#f59e0b');
+        return;
+    }
+    aiMode = 'modify';
+    setupAIModal();
+}
+
+// ─── 触发参考生成接口 ───
+function runAIGenRelated() {
+    const originalJson = document.getElementById('rule-body').value.trim();
+    if (!originalJson) {
+        showToast('⚠️ 当前 Mock 编辑器内容为空，无法参考生成接口！', '#f59e0b');
+        return;
+    }
+    aiMode = 'genRelated';
     setupAIModal();
 }
 
@@ -363,7 +561,12 @@ async function runAIGenerate() {
     const loadingTexts = {
         'generate': '⏳ 生成中...',
         'mutate': '⏳ 变异中...',
-        'repair': '⏳ 修复中...'
+        'repair': '⏳ 修复中...',
+        'overflow': '⏳ 生成撑破数据...',
+        'tokenExpired': '⏳ 生成错误响应...',
+        'reverse': '⏳ 倒序中...',
+        'modify': '⏳ 修改中...',
+        'genRelated': '⏳ 生成配套接口...'
     };
     submitBtn.textContent = loadingTexts[aiMode] || '⏳ 处理中...';
     submitBtn.disabled = true;
@@ -388,41 +591,18 @@ async function runAIGenerate() {
         }
     }
 
+    // 使用共享提示词库构建 System Prompt
+    systemPrompt = buildEditorSystemPrompt(aiMode, isOriginalJson);
+
     if (aiMode === 'generate') {
-        systemPrompt = `你是一个专业的 Mock API 数据生成与修改助手。
-根据用户的描述，生成或修改并返回符合要求的数据。
-要求：
-1. 【最重要】默认情况下，你必须基于给定的原始数据（如果存在）进行修改或扩展，保留原始数据的结构和已知字段。除非用户在需求中明确指明（如“不适用原数据”、“全新生成”、“忽略原有内容”等），否则绝对不能随意丢弃原始数据的内容。
-2. 如果原始数据不为空且不是 JSON 格式（例如它是 SSE 文本流、XML、HTML等），你必须严格保持原有的格式风格，绝对不能强制将其转换为标准的 JSON 对象或结构。
-3. 如果数据属于标准 JSON 格式，你输出的内容必须是合法的、可以直接被解析的纯 JSON 格式文本。绝对不能包含任何 Markdown 代码块标记（如 \`\`\`json），绝对不能包含任何解释性文字或对话。
-4. 数字类型合理随机，字符串内容真实可信，不要使用敷衍的占位符。
-5. 如果原数据为空且用户没有指定其他的格式，默认外层结构为 {"code": 200, "message": "success", "data": ...}。`;
         userPrompt = originalJson ? `【现有数据（非JSON时请原样拓展，不要转为JSON）】：\n${originalJson}\n\n【用户的生成/修改需求】：\n${prompt}` : prompt;
-    
     } else if (aiMode === 'mutate') {
-        systemPrompt = `你是一个网络接口健壮性测试助手（混沌测试）。
-你的任务是：根据给定的原始数据，生成包含各种极端异常情况、边界值、脏数据的异常变异数据，以帮助测试客户端应用程序的健壮性。
-变异规则包括（随机组合使用）：
-1. 将部分值设为 null，或者直接从结构中剔除该字段或 key
-2. 制造一些类型异常，例如数字变成科学计数法字符串，或者布尔值变成 "true" / "false" 字符串
-3. 数值字段产生异常边界：空值、-1、99999999999 等溢出值
-4. 制造大字段：让某些文本字段包含成千上万个字符
-5. 随机插入一些特殊非法字符或 XSS 注入脚本样式（如 &lt;script&gt;alert(1)&lt;/script&gt;）
-要求：
-1. 【最重要】如果原始数据不为空且不是 JSON 格式（例如它是 SSE 文本流、XML、HTML、普通文本等），或者用户明确指明了“基于已有的数据和格式”、“保持原格式”，你必须严格保持原有的格式风格，绝对不能强制将其转换为标准的 JSON 对象。你应当在此非 JSON 格式的基础上（如 SSE 每一帧的数据包内，或文本结构中）进行脏数据注入、异常变异或内容剔除。
-2. 如果数据属于标准 JSON 格式，你输出的内容必须是合法的、可以直接被解析的纯 JSON 格式文本。绝对不能包含任何 Markdown 代码块标记（如 \`\`\`json），绝对不能包含任何解释性文字或对话。
-3. 输出必须保持与原始数据一致 of 格式风格（如原先是 JSON 字典则返回字典，原先是 SSE 文本流则返回 SSE 文本流）。`;
         userPrompt = originalJson ? `【原始数据（非JSON时请保持原结构格式变异）】：\n${originalJson}\n\n【用户的变异额外要求】：\n${prompt}` : prompt;
-        
     } else if (aiMode === 'repair') {
-        systemPrompt = `你是一个专业的数据语法修复工具。
-你的任务是：尽全力修复给定的由于复制粘贴等原因引起的、格式损坏的数据，并输出符合对应标准格式规范的内容。
-修复指南：
-1. 【最重要】如果原始数据不为空且不是 JSON 格式（例如它是 SSE 文本流、XML、HTML等），你必须保留其原有格式框架，只修复里面的语法或标记错误（如补全 XML 标签，修复损坏的 SSE 换行或 JSON 格式包），绝对不能强行转换成一个标准的单 JSON 对象。
-2. 如果原数据本就属于 JSON 格式，请补齐缺失的括号、双引号、单引号、冒号或逗号；将非法的单引号键值替换为标准双引号；剔除末尾多余的逗号，保证输出合法的、可以直接被解析的纯 JSON 格式文本。
-3. 绝对不能包含任何 Markdown 代码块标记（如 \`\`\`json），绝对不能包含令人反感的解释性文字或对话。
-4. 绝对不能随意阉割或破坏核心数据，只做格式修复。输出必须保持与原始数据一致的格式和命名风格。`;
         userPrompt = originalJson ? `【损坏的原始数据】：\n${originalJson}\n\n【额外重构指令】：\n${prompt}` : prompt;
+    } else {
+        // overflow / tokenExpired / reverse / modify / genRelated 等模式
+        userPrompt = originalJson ? `【原始数据】：\n${originalJson}\n\n【用户的额外要求】：\n${prompt || '按默认规则处理'}` : (prompt || '按默认规则处理');
     }
 
     try {

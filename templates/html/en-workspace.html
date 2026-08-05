@@ -15,7 +15,8 @@
                         <button class="btn-refresh" onclick="loadLogs()" title="Refresh" data-i18n-title="refresh_btn"
                             style="padding: 6px 8px;">🔄 <span>Refresh</span></button>
                         <button class="btn-toggle-service active" onclick="toggleServiceButton()"
-                            id="btn-toggle-service">ON</button>
+                            id="btn-toggle-service">Mock开启</button>
+                        <button class="btn-ai-entry" onclick="openAIDrawer()" title="AI Mock Config" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(126, 34, 206, 0.2);">✨ Summon AI Assistant</button>
                     </div>
                 </div>
 
@@ -30,7 +31,6 @@
                         <button class="filter-btn" onclick="setLogFilter('GET', this)">GET</button>
                         <button class="filter-btn" onclick="setLogFilter('POST', this)">POST</button>
                         <button class="filter-btn" onclick="setLogFilter('mocked', this)">MOCK</button>
-                        <button class="filter-btn" onclick="setLogFilter('missed', this)">MISSED</button>
                         <div class="filter-toggle-wrap">
                             <button class="filter-toggle-btn active" id="filter-logs-toggle" onclick="onFilterToggleClick()" ondblclick="openLogFilterManager()" title="Click: hide root '/' requests; Double-click: manage path filters (/sa, /ioslog, ...)">
                                 <span class="filter-toggle-dot"></span>
@@ -89,34 +89,11 @@
                             </span>
                         </div>
 
-                        <!-- Stats Grid -->
-                        <div class="insights-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;">Intercepted</div>
-                                <div class="stat-value" style="font-size: 24px; font-weight: 700; color: var(--text);">1,204</div>
-                                <div class="stat-trend text-green" style="font-size: 10px; margin-top: 4px; font-weight: 500;">+12% today</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--purple); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;">Mock Match Rate</div>
-                                <div class="stat-value text-purple" style="font-size: 24px; font-weight: 700;">85.2%</div>
-                                <div class="stat-trend text-muted" style="font-size: 10px; margin-top: 4px; font-weight: 500;">Avg. across endpoints</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--accent); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;">AI Generated Mocks</div>
-                                <div class="stat-value text-blue" style="font-size: 24px; font-weight: 700;">342</div>
-                                <div class="stat-trend text-green" style="font-size: 10px; margin-top: 4px; font-weight: 500;">High efficiency</div>
-                            </div>
-                            <div class="stat-card" style="background: var(--surface); padding: 16px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--orange); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
-                                <div class="stat-title" style="color: var(--muted); font-size: 11px; margin-bottom: 6px;">Active Rules</div>
-                                <div class="stat-value text-orange" style="font-size: 24px; font-weight: 700;">45</div>
-                                <div class="stat-trend text-muted" style="font-size: 10px; margin-top: 4px; font-weight: 500;">3 updated recently</div>
-                            </div>
-                        </div>
 
                         <!-- Main Grid -->
                         <div class="insights-main-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
                             
-                            <!-- Global AI Assistant Panel (AI 实验室) -->
+                            <!-- Global AI Mock 配置助手 -->
                             <div class="insight-card ai-assistant-panel" style="grid-column: span 2; background: linear-gradient(135deg, rgba(168, 85, 247, 0.04) 0%, rgba(59, 130, 246, 0.04) 100%); border-radius: 16px; border: 1px solid rgba(168, 85, 247, 0.15); padding: 20px; position: relative; overflow: hidden; box-shadow: 0 8px 32px rgba(168, 85, 247, 0.04);">
                                 <div style="position: absolute; top: -50px; right: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%); pointer-events: none;"></div>
                                 
@@ -124,7 +101,7 @@
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span style="font-size: 20px;">🔮</span>
                                         <div>
-                                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text);">Kitty AI Laboratory</h3>
+                                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text);">✨ AI Mock 配置助手</h3>
                                             <p style="margin: 2px 0 0 0; font-size: 11px; color: var(--text-muted);">No packets needed! Design and deploy mock rules using natural language</p>
                                         </div>
                                     </div>
@@ -134,16 +111,6 @@
                                 </div>
 
                                 <div style="display: flex; flex-direction: column; gap: 12px;">
-                                    <div style="display: flex; gap: 8px;">
-                                        <select id="global-ai-method" style="background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600; cursor: pointer; outline: none;">
-                                            <option value="GET">GET</option>
-                                            <option value="POST" selected>POST</option>
-                                            <option value="PUT">PUT</option>
-                                            <option value="DELETE">DELETE</option>
-                                            <option value="PATCH">PATCH</option>
-                                        </select>
-                                        <input type="text" id="global-ai-path" placeholder="/api/v1/user/profile" style="flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 12px; outline: none; font-family: monospace;" />
-                                    </div>
 
                                     <div class="ai-quick-chips" style="margin-bottom: 2px;">
                                         <button type="button" class="ai-chip" onclick="insertQuickActionPrompt('generate','global-ai-prompt')" data-i18n="ai_chip_generate">🪄 Auto Generate</button>
@@ -304,9 +271,6 @@
                     <div id="details-layout" class="details-full" style="display: none; height: 100%;">
                         <div class="middle-header" style="display: flex !important; flex-direction: row !important; justify-content: flex-start !important; align-items: center !important; padding: 14px 20px !important; border-bottom: none !important;">
                             <h2 class="middle-title">Request Viewer</h2>
-                            <div class="middle-actions">
-                                <button class="btn-ai-entry" onclick="openAIDrawer()" title="AI Mock Config" style="background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(126, 34, 206, 0.2);" >✨ Summon AI Assistant</button>
-                            </div>
                         </div>
                         <!-- Column 3: Client Request Details -->
                         <div class="detail-block" style="margin-top: 14px;">
@@ -536,14 +500,21 @@
                                             onclick="switchEditorMode('raw')" >📝 Raw Source</button>
                                         <button class="btn-import-real" onclick="importRealResponse()"
                                             title="Import real response captured from the left to editor" data-i18n-title="btn_import_real_title" >📥 Import Real Response</button>
+                                        <button class="btn-save-enable" onclick="saveRule()"
+                                            title="Quick save and enable current Mock rule">💾 Save & Enable</button>
                                     </div>
 
                                     <div class="ai-toolbar">
                                         <span class="ai-toolbar-label">✨ AI 助手:</span>
-                                        <button class="btn-ai-tool" onclick="openAIGenerate()">🌟 智能生成</button>
-                                        <button class="btn-ai-tool mutate" onclick="runAIMutate()">💥 异常变异</button>
-                                        <button class="btn-ai-tool repair" onclick="runAIRepair()">🔧 语法修复</button>
-                                        <button class="btn-ai-tool model" onclick="openAIModelGen()">📱 导出代码</button>
+                                        <button class="btn-ai-tool" onclick="openAIGenerate()">🌟 Smart Gen</button>
+                                        <button class="btn-ai-tool mutate" onclick="runAIMutate()">💥 Mutate</button>
+                                        <button class="btn-ai-tool overflow" onclick="runAIOverflow()">🌍 Overflow</button>
+                                        <button class="btn-ai-tool token" onclick="runAITokenExpired()">🔐 Token Exp</button>
+                                        <button class="btn-ai-tool reverse" onclick="runAIReverse()">🔀 Reverse</button>
+                                        <button class="btn-ai-tool modify" onclick="runAIModify()">✏️ Modify</button>
+                                        <button class="btn-ai-tool related" onclick="runAIGenRelated()">🧩 Related</button>
+                                        <button class="btn-ai-tool repair" onclick="runAIRepair()">🔧 Fix</button>
+                                        <button class="btn-ai-tool model" onclick="openAIModelGen()">📱 Export</button>
                                     </div>
 
                                     <div class="editor-body-wrapper">
@@ -603,10 +574,6 @@
                                 <button class="btn-settings-action" onclick="toggleTheme()" title="Toggle dark/light theme">
                                     <span>🌓</span>
                                     <span>Toggle Theme</span>
-                                </button>
-                                <button class="btn-settings-action" onclick="toggleLanguage()" title="Switch language">
-                                    <span>🌍</span>
-                                    <span>EN/中</span>
                                 </button>
                             </div>
                         </div>
