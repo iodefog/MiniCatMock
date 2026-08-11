@@ -4,6 +4,12 @@ for env_key in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_P
     os.environ.pop(env_key, None)
 
 import sys
+import string
+import secrets
+try:
+    import yaml
+except Exception:  # PyYAML 未安装时降级，仅影响读取本地 ngrok token
+    yaml = None
 import json
 import time
 import datetime
@@ -201,6 +207,67 @@ def _normalize_match_path(p: str) -> str:
     if len(p) > 1 and p.endswith("/"):
         p = p.rstrip("/")
     return p
+
+
+def _deep_search(obj, key):
+    """在（可能嵌套的）dict/list 中递归查找第一个匹配的 key，找不到返回 None。"""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            r = _deep_search(v, key)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for item in obj:
+            r = _deep_search(item, key)
+            if r is not None:
+                return r
+    return None
+
+
+def _search_in_text(text, key, expected):
+    """在文本/JSON 字符串中查找 "key": value 形式的匹配，支持布尔/数字/字符串。
+    命中返回提取到的值（与 expected 类型无关，仅用于返回以做字符串比较），未命中返回 None。"""
+    import re
+    pattern = r'["\']?\b' + re.escape(key) + r'\b["\']?\s*:\s*("(?:[^"\\]|\\.)*"|true|false|\d+(?:\.\d+)?|null)'
+    m = re.search(pattern, text)
+    if not m:
+        return None
+    raw = m.group(1)
+    if raw in ("true", "false", "null"):
+        return raw
+    if raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1]
+    return raw  # 数字
+
+
+def _norm(v):
+    """把值规范成可比较的小写字符串：布尔/None 统一小写，其余用 str() 且整体小写。"""
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if v is None:
+        return "null"
+    if isinstance(v, bool):  # 兜底（理论上已被上面覆盖）
+        return "true" if v else "false"
+    return str(v).strip().lower()
+
+
+def _values_equal(a, b) -> bool:
+    """类型感知的比较：支持 字符串"true" 与 布尔True、数字字符串与数字 等互匹配。"""
+    if a is None or b is None:
+        return a is None and b is None
+    try:
+        if type(a) is type(b):
+            return a == b
+    except Exception:
+        pass
+    return _norm(a) == _norm(b)
+
+
+
 
 def match_path_mapping(url_path: str, method: str = "ANY"):
     """根据请求 path 与 method 匹配路径映射规则。
@@ -773,133 +840,178 @@ async def get_index_en():
         }
     )
 
-# ─── 跨网联通（Localtunnel）子系统状态 ───
-# 前端 /api/server-info 依赖 localtunnel_active / localtunnel_url / localtunnel_error
-# 三个字段，且会通过 POST /api/localtunnel/toggle 启停通道。此前后端缺失该实现，
-# 导致点击「跨网联通」后一直卡在「正在初始化」。
-LT_CONFIG_PATH = os.path.join(DATA_DIR, "localtunnel_config.json")
-lt_proc = None        # 当前 localtunnel 子进程（None 表示未运行）
-lt_active = False     # 是否已成功建立公网通道
-lt_url = ""           # 公网 URL
-lt_error = ""         # 错误信息（非空表示失败）
-_lt_lock = threading.Lock()
+# ─── 跨网联通（Ngrok）子系统状态 ───
+# 前端 /api/server-info 依赖 ngrok_active / ngrok_url / ngrok_error / ngrok_auth
+# 四个字段，且会通过 POST /api/ngrok/toggle 启停通道。
+# 每次启动生成随机访问账号密码，以 --basic-auth 注入 ngrok，二维码本机闭环传递，
+# 适用于「人手一 Mac、本地自用」的临时跨网调试场景。
+NGROK_CONFIG_PATH = os.path.join(DATA_DIR, "ngrok_config.json")
+ngrok_proc = None      # 当前 ngrok 子进程（None 表示未运行）
+ngrok_active = False   # 是否已成功建立公网通道
+ngrok_url = ""         # 公网 URL（不含账号密码）
+ngrok_auth = ""        # 本次隧道的 "user:password"（仅本机内存，不落盘）
+ngrok_error = ""       # 错误信息（非空表示失败）
+_ngrok_lock = threading.Lock()
 
 
-def load_lt_config():
-    if os.path.exists(LT_CONFIG_PATH):
+def load_ngrok_config():
+    if os.path.exists(NGROK_CONFIG_PATH):
         try:
-            with open(LT_CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(NGROK_CONFIG_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
     return {}
 
 
-def save_lt_config(cfg):
+def save_ngrok_config(cfg):
     try:
-        with open(LT_CONFIG_PATH, "w", encoding="utf-8") as f:
+        with open(NGROK_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
 
-def _lt_reader():
-    """后台线程：读取 localtunnel 子进程输出，解析出公网 URL。"""
-    global lt_active, lt_url, lt_error, lt_proc
+def _gen_ngrok_password(length=16):
+    """生成随机高强度密码（字母+数字）。"""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _ngrok_reader():
+    """后台线程：读取 ngrok 子进程输出，解析出公网 URL。"""
+    global ngrok_active, ngrok_url, ngrok_error, ngrok_proc
     try:
-        for raw in lt_proc.stdout:
+        for raw in ngrok_proc.stdout:
             line = raw.strip()
             if not line:
                 continue
-            # localtunnel 正常输出形如：your url is: https://xxxx.loca.lt
-            m = re.search(r"https?://[^\s'\"<>]+", line)
+            # ngrok v3 真实输出形如：
+            #   ... msg="started tunnel" ... url=https://xxxx.ngrok-free.dev
+            m = re.search(r"url=(https://[^\s'\"]+ngrok[^\s'\"]*)", line)
             if m:
-                url = m.group(0).rstrip(".,)")
-                lt_url = url
-                lt_active = True
-                lt_error = ""
+                ngrok_url = m.group(1).rstrip(".,)")
+                ngrok_active = True
+                ngrok_error = ""
                 return
+            # 捕获关键错误（如子域被占用 ERR_NGROK_334）并透传给前端
+            if "ERR_NGROK" in line or "failed to start tunnel" in line:
+                err_match = re.search(r"ERR_NGROK_\d+", line)
+                ngrok_error = f"ngrok 启动失败：{err_match.group(0) if err_match else '隧道冲突'}，请稍后重试或重启服务"
+                ngrok_active = False
         # 子进程退出且未取得 URL -> 视为失败
-        if lt_proc.poll() is not None and not lt_active:
-            lt_error = lt_error or "localtunnel 进程已退出（可能未安装或网络不通）"
-            lt_active = False
+        if ngrok_proc.poll() is not None and not ngrok_active:
+            ngrok_error = ngrok_error or "ngrok 进程已退出（可能未安装或网络不通）"
+            ngrok_active = False
     except Exception as e:
-        lt_error = f"读取 localtunnel 输出失败: {e}"
-        lt_active = False
+        ngrok_error = f"读取 ngrok 输出失败: {e}"
+        ngrok_active = False
 
 
-def start_localtunnel_async():
-    """在后台启动 localtunnel（npx 方式），不阻塞请求。"""
-    global lt_proc, lt_active, lt_url, lt_error
-    with _lt_lock:
-        if lt_proc and lt_proc.poll() is None:
+def start_ngrok_async():
+    """在后台启动 ngrok（带随机密码 basic-auth），不阻塞请求。"""
+    global ngrok_proc, ngrok_active, ngrok_url, ngrok_error, ngrok_auth
+    with _ngrok_lock:
+        if ngrok_proc and ngrok_proc.poll() is None:
             return  # 已在运行
-        lt_active = False
-        lt_url = ""
-        lt_error = ""
-        npx = shutil.which("npx") or shutil.which("localtunnel")
-        if not npx:
-            lt_error = "未检测到 Node.js / npx，无法启动跨网通道（请先安装 Node.js）"
+        ngrok_active = False
+        ngrok_url = ""
+        ngrok_error = ""
+        ngrok_bin = shutil.which("ngrok")
+        if not ngrok_bin:
+            ngrok_error = "未检测到 ngrok，请先安装：brew install ngrok/ngrok/ngrok"
             return
-        cfg = load_lt_config() or {}
-        cmd = [npx, "localtunnel", "--port", "8099"]
-        sub = (cfg.get("subdomain") or "").strip()
-        if sub:
-            cmd += ["--subdomain", sub]
+        # 启动前先清理本机残留的 ngrok 进程，避免免费子域被占用导致 ERR_NGROK_334
         try:
-            lt_proc = subprocess.Popen(
+            subprocess.run(["pkill", "-f", "ngrok"], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)
+        except Exception:
+            pass
+        # 每次启动生成随机账号密码
+        user = "mockuser"
+        password = _gen_ngrok_password()
+        ngrok_auth = f"{user}:{password}"
+        cmd = [ngrok_bin, "http", "8099", "--basic-auth", ngrok_auth,
+               "--pooling-enabled", "--log=stdout"]
+        token = _read_ngrok_token()
+        if token:
+            cmd += ["--authtoken", token]
+        try:
+            ngrok_proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
             )
         except Exception as e:
-            lt_error = f"启动 localtunnel 失败: {e}"
+            ngrok_error = f"启动 ngrok 失败: {e}"
             return
-    threading.Thread(target=_lt_reader, daemon=True).start()
+    threading.Thread(target=_ngrok_reader, daemon=True).start()
 
 
-def stop_localtunnel():
-    """停止 localtunnel 子进程并复位状态。"""
-    global lt_proc, lt_active, lt_url, lt_error
-    with _lt_lock:
-        if lt_proc and lt_proc.poll() is None:
+def _read_ngrok_token():
+    """读取 ngrok 配置文件中的 authtoken（若用户已配置）。"""
+    cfg_paths = [
+        os.path.expanduser("~/.config/ngrok/ngrok.yml"),
+        os.path.expanduser("~/Library/Application Support/ngrok/ngrok.yml"),
+        os.path.expanduser("~/.ngrok2/ngrok.yml"),
+    ]
+    for p in cfg_paths:
+        if os.path.exists(p):
             try:
-                lt_proc.terminate()
-                lt_proc.wait(timeout=5)
+                with open(p, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                if isinstance(data, dict) and data.get("authtoken"):
+                    return data["authtoken"]
+            except Exception:
+                pass
+    return os.environ.get("NGROK_AUTHTOKEN", "")
+
+
+def stop_ngrok():
+    """停止 ngrok 子进程并复位状态（含随机密码，下次开启重新生成）。"""
+    global ngrok_proc, ngrok_active, ngrok_url, ngrok_error, ngrok_auth
+    with _ngrok_lock:
+        if ngrok_proc and ngrok_proc.poll() is None:
+            try:
+                ngrok_proc.terminate()
+                ngrok_proc.wait(timeout=5)
             except Exception:
                 try:
-                    lt_proc.kill()
+                    ngrok_proc.kill()
                 except Exception:
                     pass
-        lt_proc = None
-        lt_active = False
-        lt_url = ""
-        lt_error = ""
+        ngrok_proc = None
+        ngrok_active = False
+        ngrok_url = ""
+        ngrok_error = ""
+        ngrok_auth = ""
 
 
-class LocaltunnelToggle(BaseModel):
+class NgrokToggle(BaseModel):
     enabled: bool = True
 
 
-@app.post("/api/localtunnel/toggle")
-async def localtunnel_toggle(payload: LocaltunnelToggle):
-    cfg = load_lt_config() or {}
+@app.post("/api/ngrok/toggle")
+async def ngrok_toggle(payload: NgrokToggle):
+    cfg = load_ngrok_config() or {}
     if payload.enabled:
         cfg["enabled"] = True
-        save_lt_config(cfg)
-        start_localtunnel_async()
+        save_ngrok_config(cfg)
+        start_ngrok_async()
     else:
-        stop_localtunnel()
+        stop_ngrok()
         cfg["enabled"] = False
-        save_lt_config(cfg)
-    return {"status": "success", "active": lt_active, "url": lt_url, "error": lt_error}
+        save_ngrok_config(cfg)
+    return {"status": "success", "active": ngrok_active, "url": ngrok_url,
+            "auth": ngrok_auth, "error": ngrok_error}
 
 
 @app.get("/api/server-info")
 async def get_server_info():
     local_ip = get_local_ip()
     port = 8099
-    if lt_active and lt_url:
-        mock_url = lt_url.rstrip("/") + "/mock"
+    if ngrok_active and ngrok_url:
+        mock_url = ngrok_url.rstrip("/") + "/mock"
     else:
         mock_url = f"http://{local_ip}:{port}/mock"
     return {
@@ -907,9 +1019,10 @@ async def get_server_info():
         "port": port,
         "mock_url": mock_url,
         "os_name": os.name,
-        "localtunnel_active": lt_active,
-        "localtunnel_url": lt_url,
-        "localtunnel_error": lt_error,
+        "ngrok_active": ngrok_active,
+        "ngrok_url": ngrok_url,
+        "ngrok_auth": ngrok_auth,
+        "ngrok_error": ngrok_error,
     }
 
 @app.get("/api/proxy.mobileconfig")
@@ -1885,7 +1998,7 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
             for file in files:
                 if not file.endswith(".json"):
                     continue
-                if file in ["ai_config.json", "telemetry_config.json", "localtunnel_config.json"]:
+                if file in ["ai_config.json", "telemetry_config.json", "ngrok_config.json"]:
                     continue
                 try:
                     with open(os.path.join(root, file), "r", encoding="utf-8") as f:
@@ -1904,11 +2017,25 @@ async def _process_mock_request(path: str, request: Request, log_entry: dict, re
                     match_params = rule.get("match_params")
                     params_matched = True
                     if match_params:
+                        # 从 query、表单、以及整个 JSON 请求体（含嵌套）中递归查找 key
+                        form_params = {}
+                        if isinstance(body_json, str):
+                            # text/plain 或原始 JSON 字符串，尝试按表单解析
+                            try:
+                                form_params = {k: (vv[0] if isinstance(vv, list) else vv)
+                                               for k, vv in urllib.parse.parse_qs(body_json, keep_blank_values=True).items()}
+                            except Exception:
+                                form_params = {}
                         for k, v in match_params.items():
                             val_in_req = query_params.get(k)
+                            if val_in_req is None and form_params:
+                                val_in_req = form_params.get(k)
                             if val_in_req is None and isinstance(body_json, dict):
-                                val_in_req = body_json.get(k)
-                            if str(val_in_req) != str(v):
+                                val_in_req = _deep_search(body_json, k)
+                            # 字符串/文本请求体里也可能直接包含 "needRecommend": true
+                            if val_in_req is None and isinstance(body_str, str) and body_str.strip():
+                                val_in_req = _search_in_text(body_str, k, v)
+                            if not _values_equal(val_in_req, v):
                                 params_matched = False
                                 break
                     if not params_matched:

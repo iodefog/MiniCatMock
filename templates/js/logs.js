@@ -184,7 +184,7 @@ async function initQrCode() {
         });
 
         // 根据后端配置初始化 UI 连接模式
-        if (info.localtunnel_active) {
+        if (info.ngrok_active) {
             const tunnelRadio = document.querySelector('input[name="connection-mode"][value="tunnel"]');
             if (tunnelRadio) tunnelRadio.checked = true;
 
@@ -198,10 +198,10 @@ async function initQrCode() {
             document.getElementById('tunnel-status-container').style.display = 'block';
             document.getElementById('tunnel-security-warning').style.display = 'block';
 
-            if (info.localtunnel_url) {
-                updateTunnelStatusUI('active', info.localtunnel_url);
-            } else if (info.localtunnel_error) {
-                updateTunnelStatusUI('failed', null, info.localtunnel_error);
+            if (info.ngrok_url) {
+                updateTunnelStatusUI('active', info.ngrok_url);
+            } else if (info.ngrok_error) {
+                updateTunnelStatusUI('failed', null, info.ngrok_error);
             } else {
                 updateTunnelStatusUI('connecting');
                 if (tunnelPollInterval) clearInterval(tunnelPollInterval);
@@ -229,20 +229,42 @@ async function initQrCode() {
 async function onConnectionModeChange(mode) {
     const lanLabel = document.getElementById('mode-lan-label');
     const tunnelLabel = document.getElementById('mode-tunnel-label');
-    
+    const lanRadio = document.querySelector('input[name="connection-mode"][value="lan"]');
+    const tunnelRadio = document.querySelector('input[name="connection-mode"][value="tunnel"]');
+
+    // 从「跨网联通 (Ngrok)」切回「局域网直连 (LAN)」时，强提示：切换会断开公网隧道
+    if (mode === 'lan') {
+        const ok = window.confirm(
+            '⚠️ 切换提示\n\n即将从「跨网联通 (Ngrok)」切换到「局域网直连 (LAN)」。\n' +
+            '此操作会立即断开当前公网隧道，外部设备（如异地手机）将无法通过公网地址访问本机 Mock 服务。\n\n' +
+            '（本地 Mock 服务本身不会停止，局域网内仍可正常访问。）\n\n' +
+            '确定要断开跨网通道并切换吗？'
+        );
+        if (!ok) {
+            // 用户取消：把单选状态还原回「跨网联通」
+            if (tunnelRadio) tunnelRadio.checked = true;
+            if (lanRadio) lanRadio.checked = false;
+            if (lanLabel && tunnelLabel) {
+                tunnelLabel.classList.add('active');
+                lanLabel.classList.remove('active');
+            }
+            return;
+        }
+    }
+
     if (mode === 'lan') {
         if (lanLabel && tunnelLabel) {
             lanLabel.classList.add('active');
             tunnelLabel.classList.remove('active');
         }
-        
+
         document.getElementById('tunnel-status-container').style.display = 'none';
         document.getElementById('tunnel-security-warning').style.display = 'none';
         if (tunnelPollInterval) {
             clearInterval(tunnelPollInterval);
             tunnelPollInterval = null;
         }
-        
+
         await setTunnelEnabledOnServer(false);
         initQrCode();
     } else {
@@ -250,13 +272,13 @@ async function onConnectionModeChange(mode) {
             tunnelLabel.classList.add('active');
             lanLabel.classList.remove('active');
         }
-        
+
         document.getElementById('tunnel-status-container').style.display = 'block';
         document.getElementById('tunnel-security-warning').style.display = 'block';
         updateTunnelStatusUI('connecting');
-        
+
         await setTunnelEnabledOnServer(true);
-        
+
         if (tunnelPollInterval) clearInterval(tunnelPollInterval);
         tunnelPollInterval = setInterval(pollTunnelStatus, 1500);
         pollTunnelStatus(); // 立即执行一次轮询
@@ -265,13 +287,13 @@ async function onConnectionModeChange(mode) {
 
 async function setTunnelEnabledOnServer(enabled) {
     try {
-        await fetch('/api/localtunnel/toggle', {
+        await fetch('/api/ngrok/toggle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled: enabled })
         });
     } catch (e) {
-        console.error('Failed to toggle localtunnel on server:', e);
+        console.error('Failed to toggle ngrok on server:', e);
     }
 }
 
@@ -290,29 +312,32 @@ async function pollTunnelStatus() {
             return;
         }
         
-        if (info.localtunnel_url) {
+        if (info.ngrok_url) {
             if (tunnelPollInterval) {
                 clearInterval(tunnelPollInterval);
                 tunnelPollInterval = null;
             }
-            updateTunnelStatusUI('active', info.localtunnel_url);
-            
+            updateTunnelStatusUI('active', info.ngrok_url);
+
+            // 二维码编码：含随机账号密码的公网访问地址（本机闭环扫码即用，不进聊天工具/URL）
+            const auth = info.ngrok_auth || "";
+            const qrText = auth ? info.mock_url.replace("://", `://${auth}@`) : info.mock_url;
             document.getElementById('mock-url-text').innerText = info.mock_url;
             const qrEl = document.getElementById('qrcode');
             qrEl.style.display = 'inline-block';
             qrEl.innerHTML = '';
             new QRCode(qrEl, {
-                text: info.mock_url,
+                text: qrText,
                 width: 148,
                 height: 148,
                 correctLevel: QRCode.CorrectLevel.H
             });
-        } else if (info.localtunnel_error) {
+        } else if (info.ngrok_error) {
             if (tunnelPollInterval) {
                 clearInterval(tunnelPollInterval);
                 tunnelPollInterval = null;
             }
-            updateTunnelStatusUI('failed', null, info.localtunnel_error);
+            updateTunnelStatusUI('failed', null, info.ngrok_error);
         } else {
             updateTunnelStatusUI('connecting');
         }
@@ -590,7 +615,7 @@ async function loadLogs() {
     } catch (e) { }
 }
 
-// ─── 增量刷新抓包列表（仅追加新条目，用于自动轮询）───
+// ─── 增量刷新抓包列表（追加新条目 + 同步已有条目的状态变更，用于自动轮询）───
 async function incrementalLoadLogs() {
     try {
         const res = await fetch('/api/logs');
@@ -603,16 +628,52 @@ async function incrementalLoadLogs() {
             return;
         }
 
-        // 找新条目（日志按最新在前排列）
-        const existingIds = new Set(window.allCapturedLogs.map(l => l.id));
-        const newLogs = logs.filter(l => !existingIds.has(l.id));
-        if (newLogs.length === 0) return; // 无新增，不动 DOM
+        // 以【后端返回为准】合并：
+        // 1) 已有条目若后端返回了更新（尤其是 loading→完成、status、duration），用新对象覆盖，
+        //    否则「请求中」的条目会因 id 已存在被跳过，永远卡在「⏳ 请求中」。
+        // 2) 后端新增的 id 追加到头部。
+        const incomingMap = new Map(logs.map(l => [l.id, l]));
+        const seen = new Set();
+        let changed = false;
+        let hasNew = false;
 
-        // 有新增，追加到头部
-        window.allCapturedLogs = [...newLogs, ...window.allCapturedLogs];
+        const merged = [];
+        for (const oldLog of window.allCapturedLogs) {
+            const incoming = incomingMap.get(oldLog.id);
+            if (incoming) {
+                seen.add(oldLog.id);
+                // 状态发生变化的判定：loading 翻转 或 status/duration 出现
+                const oldDone = !oldLog.loading;
+                const newDone = !incoming.loading;
+                if (oldLog.loading !== incoming.loading ||
+                    oldLog.status !== incoming.status ||
+                    oldLog.duration_ms !== incoming.duration_ms) {
+                    changed = true;
+                }
+                // 保留前端侧的「请求中」计时起点，避免合并时重置导致超时兜底失效
+                if (oldLog.loading && incoming.loading && oldLog._loadingFirstSeen) {
+                    incoming._loadingFirstSeen = oldLog._loadingFirstSeen;
+                }
+                merged.push(incoming);
+            } else {
+                // 后端已无此条目（极端情况），保留前端记录以免闪烁
+                merged.push(oldLog);
+            }
+        }
 
-        // 重绘列表（renderFilteredLogs 内部已通过 currentSelectedLogId 保留 active 样式）
-        renderFilteredLogs();
+        // 追加后端新增的条目（按后端顺序，最新在前）
+        for (const incoming of logs) {
+            if (!seen.has(incoming.id)) {
+                merged.unshift(incoming);
+                hasNew = true;
+                changed = true;
+            }
+        }
+
+        if (hasNew || changed) {
+            window.allCapturedLogs = merged;
+            renderFilteredLogs();
+        }
     } catch (e) { }
 }
 
@@ -815,7 +876,13 @@ function renderFilteredLogs() {
         // 响应码 badge
         let statusBadge = '';
         if (log.loading) {
-            statusBadge = `<span class="status-badge loading">⏳ 请求中</span>`;
+            // 前端兜底：若某条「请求中」在前端已滞留过久（疑似长连接/未结束），
+            // 避免一直显示「⏳ 请求中」误导用户，改为「请求超时」提示。
+            if (!log._loadingFirstSeen) log._loadingFirstSeen = Date.now();
+            const stale = (Date.now() - log._loadingFirstSeen) > 60000;
+            statusBadge = stale
+                ? `<span class="status-badge loading" title="该请求长时间未结束（可能为长连接或未关闭的连接）">⏳ 请求超时?</span>`
+                : `<span class="status-badge loading">⏳ 请求中</span>`;
         } else if (log.status) {
             // 业务层错误（HTTP 200 但响应体携带失败的业务状态码，如 status:100）也标红
             const isErr = log.status >= 400 || log.business_error;

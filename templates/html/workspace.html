@@ -656,7 +656,7 @@
                                         <input type="radio" name="connection-mode" value="tunnel" onchange="onConnectionModeChange('tunnel')" class="mode-radio">
                                         <div class="mode-header">
                                             <div class="mode-icon-wrapper">🌐</div>
-                                            <span class="mode-title">跨网联通 (Tunnel)</span>
+                                            <span class="mode-title">跨网联通 (Ngrok)</span>
                                         </div>
                                         <span class="mode-desc">基于公网安全隧道，适用于 4G/5G、跨网段或无法连接同一 Wi-Fi 的复杂场景。</span>
                                         <div class="mode-check-badge"></div>
@@ -675,9 +675,12 @@
                                     <div class="settings-warning-body">
                                         <strong>跨网联通安全性说明与警示</strong>
                                         <ol style="margin: 8px 0 0 16px; font-size: 12px; line-height: 1.6; color: var(--text-muted);">
-                                            <li><strong>公网暴露风险</strong>：开启后服务将通过外部公网域名临时暴露，<strong>请避免在 Mock 中写入敏感数据</strong>。</li>
-                                            <li><strong>即用即开原则</strong>：调试完成后<strong>请立即切回「局域网直连」模式</strong>以关闭公网通道。</li>
-                                            <li><strong>传输加密</strong>：数据通过 HTTPS 加密中转，但仍需注意不要传输核心保密数据。</li>
+                                            <li><strong>当前做法</strong>：本功能采用 <strong>Ngrok</strong> 建立公网隧道（<code style="font-size:11px;">brew install ngrok/ngrok/ngrok</code>），由商业公司维护、有稳定性保障，对外默认提供 HTTPS，优于免费公益中继（如 LocalTunnel）。</li>
+                                            <li><strong>访问鉴权</strong>：每次开启隧道都会<strong>自动生成 16 位随机密码</strong>，并以 <code style="font-size:11px;">--basic-auth mockuser:&lt;随机密码&gt;</code> 注入 Ngrok。<strong>未携带正确账号密码的外部请求会被 Ngrok 直接拒绝（401）</strong>，无法触及你的本地 Mock 服务。</li>
+                                            <li><strong>密码传递方式</strong>：随机密码与公网地址被编码进<strong>本机二维码</strong>（Mac ↔ 你自己的手机）闭环传递，<strong>密码不进入聊天工具、邮件，也不嵌入可被转发的链接</strong>。在<strong>「人手一 Mac、本地自用」</strong>的场景下，密码不会离开你的设备生态，泄露风险极低。</li>
+                                            <li><strong>安全性评估</strong>：相比「裸奔穿透」与免费公益服务，本方案在<strong>稳定性、子域抢占防护、访问鉴权</strong>三方面均有实质性提升；配合二维码本机闭环传递随机密码，可进一步避免密码外泄。对临时、非敏感的跨网调试而言，是<strong>足够安全且便捷</strong>的做法。</li>
+                                            <li><strong>仍非绝对安全 / 使用边界</strong>：① 流量经由 Ngrok 服务器中转，TLS 在其侧终止，请勿经此传输核心保密数据；② 免费版子域会自动复用、可能被回收或与他人冲突，<strong>请勿将其当作永久地址</strong>；③ 该方案定位为<strong>临时、非敏感的跨网调试，非生产级</strong>。</li>
+                                            <li><strong>即用即开原则</strong>：调试完成后<strong>请立即切回「局域网直连」模式</strong>以关闭公网通道；并避免将二维码/密码转发至群聊或截图外传。每次启动都会重新生成新的随机密码。</li>
                                         </ol>
                                     </div>
                                 </div>

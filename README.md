@@ -2,80 +2,78 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
-> A 100% data-localized mobile ultra-fast wireless packet capture & mock tool. Tailor-made for iOS/Android R&D, AI-driven, proxy-free via QR code scan, ensuring mobile debugging is secure, highly efficient, and pristine.
-
-![Features](小猫Mock截图/小猫mock-功能.png)
+> A 100% data-localized mobile wireless packet capture & mock tool. Tailor-made for iOS/Android R&D — AI-driven, proxy-free via QR-code scan, making mobile debugging secure, efficient, and pristine.
 
 ---
 
 ## 1. 📅 Background
 
-During the development and testing phases of mobile applications, we often encounter the following pain points:
-1. **The nightmare of proxy environments**: Traditional packet capture tools (like Charles, Fiddler, Proxyman) require configuring Wi-Fi proxies on mobile devices and installing/trusting root certificates. This process is extremely cumbersome, often fails, and pollutes the device's network environment.
-2. **Cumbersome Mock data generation**: Generating Mock data manually requires copying and pasting large amounts of JSON, lacking dynamic realism. 
-3. **Hard-to-reproduce edge cases**: Simulating extreme network anomalies (such as missing fields, type overflow, data corruption) requires writing complex scripts, resulting in low efficiency for chaos testing.
+During mobile app development and testing, we often hit these pain points:
+
+1. **Proxy environment nightmare**: Traditional capture tools (Charles, Fiddler, Proxyman) require configuring Wi-Fi proxies on the device and installing/trusting root certificates — cumbersome, error-prone, and polluting the device network.
+2. **Cumbersome mock data**: Manually copying/pasting large JSON blobs lacks dynamic realism.
+3. **Hard-to-reproduce edge cases**: Simulating anomalies (missing fields, overflow, corruption) needs complex scripts — low efficiency for chaos testing.
 
 ## 2. 🎯 Objectives
 
-Based on the pain points above, we aim to build an **ultra-minimalist and highly efficient** R&D collaboration tool:
-* **Zero config & Proxy-free**: Scan the QR code with your phone to connect instantly, achieving **"0 system proxies, 0 certificate configurations"**, completely freeing developers from the nightmare of Wi-Fi proxies and HTTPS certificate trusts.
-* **Efficient large-screen visualization**: Intuitively manage, auto-fill, and edit Mock data in real-time on a large-screen Web UI, with sub-second synchronization to real devices.
-* **Intelligent Chaos Testing**: Deeply integrated with **AI LLMs like DeepSeek, Claude**, generating highly realistic business responses and automatically injecting anomalies for fully automated chaos testing.
-* **Cross-platform support**: Provides standard interception adapters for Swift, Objective-C, Kotlin, and Java. Integrate with zero modifications to your core codebase.
+Build an **ultra-minimal, highly efficient** R&D collaboration tool:
 
-## 3. 🔍 Research: How does Big Tech handle App Mocking?
+* **Zero-config & proxy-free**: Scan a QR code to connect instantly — **0 system proxies, 0 certificate config**.
+* **Efficient large-screen visualization**: Manage, auto-fill, and edit mock data in real time on a Web UI, synced to the device in sub-second.
+* **Intelligent chaos testing**: Deeply integrated with **LLMs (DeepSeek, Claude)** to generate realistic responses and auto-inject anomalies for fully automated chaos testing.
+* **Cross-platform**: Standard interception adapters for Swift, Objective-C, Kotlin, and Java — integrate with zero changes to your core codebase.
 
-Currently, top-tier tech companies typically use a "client-side network interception + centralized configuration platform" architecture. Representative examples include:
-* **Meituan Shark**: Injects interception rules via an internal library on the client side, synchronizing Mock data dynamically from Meituan's internal testing platform to realize proxy-free packet capture and mock testing.
-* **ByteDance TTMock**: Inwardly intercepts the network layer, combined with ByteDance's internal configuration center, supporting detailed mock rules down to specific API paths and response body modifications.
-* **JD Aura / Network Library**: Extends the unified network library on the client side, switching API endpoints and injecting mock configurations dynamically via remote debug panels or sweeping code settings.
+## 3. 🔍 Research: How Big Tech Does App Mocking
 
-### 💡 Breakthrough and Evolution: The Core Advantages of "Little Cat Mock"
+Top companies typically use a "client-side interception + centralized config platform" architecture:
 
-"Little Cat Mock" is not a simple imitation. It retains the essence of Big Tech's **"Client-side partial hijacking + PC large-screen visualization"** architecture while introducing leapfrog innovations tailored for small to medium-sized teams. **It establishes three core differences compared to heavy, built-in enterprise platforms**:
+* **Meituan Shark**: Client-side library injects interception rules, dynamically syncing mock data from an internal platform.
+* **ByteDance TTMock**: Intercepts the network layer internally, combined with an internal config center, down to specific API paths.
+* **JD Aura / Network Library**: Extends the unified network library, switching endpoints and injecting mock config via remote debug panels or QR scan.
 
-1. **Decentralized Standalone Sandbox Deployment (100% Data Localization)**
-   Enterprise platforms often require registering on a unified central backend, sharing rules across teams, which easily leads to rule conflicts and data leakage. Little Cat Mock adopts an **extremely lightweight local standalone architecture** (available out-of-the-box as a single file). Each developer's computer acts as an independent Mock universe; the sandbox data is completely isolated, strictly guaranteeing local data privacy and zero rule pollution.
-2. **Zero Intrusion to Core Services & Transparent Proxy Routing**
-   Traditional Mock platforms often violently modify API endpoints globally or require complex backend cooperation. Little Cat Mock introduces a **Smart Routing Mechanism**: the App only forwards requests to the local Mock server. The server acts as a transparent proxy—if no Mock rule is matched, it seamlessly passes the request upstream to the real server. You mock exactly what you need, with zero pollution to unmocked business logic.
-3. **AI Intelligent Chaos Engine Generation**
-   While enterprise platforms have rich rules, they still rely on massive manual QA and R&D effort to fabricate and copy dull JSON response bodies. Born in the AI era, Little Cat Mock deeply integrates LLMs like DeepSeek / Claude. It can **dynamically generate** reasonable business data based on API parameters and **automatically inject random chaos anomalies** (gibberish, null values, overflows), completing a generational leap from a "static dictionary response" to a "dynamic intelligent data engine"!
+### 💡 Little Cat Mock's Core Advantages
+
+It keeps the essence of "client-side hijacking + PC large-screen visualization" while introducing leaps tailored for small/medium teams:
+
+1. **Decentralized Standalone Sandbox (100% Data Localization)**
+   Each developer's machine is an independent mock universe. Sandbox data is fully isolated — local privacy guaranteed, zero rule pollution.
+2. **Zero Intrusion & Transparent Proxy Routing**
+   The App only forwards requests to the local mock server. The server acts as a transparent proxy — if no mock rule matches, it seamlessly forwards upstream to the real server. Mock exactly what you need, zero pollution to unmocked logic.
+3. **AI Intelligent Chaos Engine**
+   Integrates LLMs (DeepSeek / Claude) to **dynamically generate** realistic business data from API params and **auto-inject** random chaos (garbage, nulls, overflows) — a generational leap from "static dictionary" to "dynamic intelligent data engine".
 
 ## 4. 🛠 Technical Implementation
 
-"Little Cat Mock" **requires no system proxies** or certificate trusts on the mobile device. Its core mechanism relies on **proxy-free direct connection & smart routing**.
+Little Cat Mock **requires no system proxies** or certificate trust on the device. The core mechanism is **proxy-free direct connection & smart routing**.
 
-![Architecture Sequence Diagram](小猫Mock截图/小猫mock-时序图.png)
+### Core Workflow
+1. **QR-code address distribution**: On launch, the console detects the LAN IP and shows a QR code (`http://<LAN-IP>:8099/mock`). Scan it with the App to persist the address.
+2. **Local client hijacking**: When mock mode is on, the App's interceptor (NSURLProtocol / OkHttp Interceptor) redirects the original backend URL to the LAN mock server URL.
+3. **Real-endpoint passthrough**: The interceptor carries the original URL and Host via headers (`X-Original-URL`, `X-Original-Host`).
+4. **Smart routing**: On receiving a request:
+   * **Match** → return user-configured or AI-generated JSON.
+   * **No match** → transparent proxy to the real upstream via `X-Original-URL`, log it on the Web console (works as a packet capture tool).
 
-### Core Workflow:
-1. **Address distribution via QR code**: The App scans the QR code to obtain the local LAN IP assigned to the "Little Cat Mock" server upon startup (e.g., `http://192.168.1.5:8099/mock`) and persists it.
-2. **Local client hijacking**: When Mock mode is enabled, the underlying interceptor (Interceptor/NSURLProtocol) in the App redirects the URL intended for the real backend to the LAN URL pointing to the Little Cat Mock server.
-3. **Real endpoint passthrough**: The interceptor carries the original URL and original Host via HTTP Headers (`X-Original-URL`, `X-Original-Host`).
-4. **Little Cat Smart Routing**: Upon receiving the request:
-   * If it matches a Mock rule, it returns the customized JSON data configured by the user or dynamically generated by AI.
-   * If it does not match, it acts as a transparent proxy, making a request to the real upstream server using `X-Original-URL` and returning the actual response. It simultaneously logs the transaction on the Web console, serving as a packet capture tool.
-
-###  iOS (Swift) Core Integration Example
+### 🍎 iOS (Swift) Integration Example
 ```swift
 class LittleCatMockAdapter {
     static func adapt(_ originalRequest: URLRequest) -> URLRequest {
         guard UserDefaults.standard.bool(forKey: "DRB_MOCK_ENABLED"),
               let mockAddress = UserDefaults.standard.string(forKey: "DRB_MOCK_SERVER_ADDRESS"),
               let originalURL = originalRequest.url else { return originalRequest }
-        
+
         let host = originalURL.host ?? "default_host"
         let path = originalURL.path
         let query = originalURL.query ?? ""
-        
-        // Rewrite the URL prefix to directly connect to the LAN Little Cat PC server (stripping the original Host)
+
         let cleanAddress = mockAddress.hasSuffix("/") ? String(mockAddress.dropLast()) : mockAddress
-        let safePath = path.hasPrefix("/") ? path : "/\\(path)"
-        
-        var newURLString = "\\(cleanAddress)\\(safePath)"
-        if !query.isEmpty { newURLString += "?\\(query)" }
-        
+        let safePath = path.hasPrefix("/") ? path : "/\(path)"
+
+        var newURLString = "\(cleanAddress)\(safePath)"
+        if !query.isEmpty { newURLString += "?\(query)" }
+
         guard let finalURL = URL(string: newURLString) else { return originalRequest }
-        
+
         var newRequest = originalRequest
         newRequest.url = finalURL
         newRequest.setValue("iOS-Swift-Client", forHTTPHeaderField: "X-LittleCat-Client")
@@ -86,25 +84,25 @@ class LittleCatMockAdapter {
 }
 ```
 
-### 🤖 Android (Kotlin) Core Integration Example
+### 🤖 Android (Kotlin) Integration Example
 ```kotlin
 class LittleCatMockInterceptor(private val context: Context) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         var request = chain.request()
         val mockEnabled = sharedPrefs.getBoolean("DRB_MOCK_ENABLED", false)
         val mockAddress = sharedPrefs.getString("DRB_MOCK_SERVER_ADDRESS", null)
-        
+
         if (mockEnabled && !mockAddress.isNullOrEmpty()) {
             val originalUrl = request.url
             val host = originalUrl.host
             val path = originalUrl.encodedPath
             val query = originalUrl.query
-            
+
             val cleanAddress = mockAddress.trim().removeSuffix("/")
             val safePath = if (path.startsWith("/")) path else "/$path"
             var newUrlString = "$cleanAddress$safePath"
             if (!query.isNullOrEmpty()) { newUrlString += "?$query" }
-            
+
             newUrlString.toHttpUrlOrNull()?.let { newUrl ->
                 request = request.newBuilder()
                     .url(newUrl)
@@ -121,65 +119,101 @@ class LittleCatMockInterceptor(private val context: Context) : Interceptor {
 
 ## 5. 📖 Tutorial
 
-### Step 01: Establish Proxy-Free Direct Connection via QR Scan
-Upon launch, the console automatically detects the LAN IP. Simply scan the QR code with your phone to establish an instant direct connection—0 configuration, no HTTP proxy, and no certificate trust required.
-![First Launch Scan](小猫Mock截图/小猫mock-首次启动页面.png)
+### Step 01: Proxy-free Direct Connection via QR Scan
+On launch, the console auto-detects the LAN IP. Scan the QR code with your phone to connect instantly — 0 config, no HTTP proxy, no certificate trust.
 
 ### Step 02: Geek-Chic Visual Dashboard
-The Web console homepage allows intuitive control over the master Mock switch, intercepted request statistics, AI LLM status, and details of the connected mobile device.
-![Console Homepage](小猫Mock截图/小猫mock-主页.png)
+The Web console controls the master mock switch, intercepted-request stats, AI LLM status, and connected device details.
 
-### Step 03: Real Device Packet Capture & One-Click cURL
-Real-time filtering and monitoring of all network requests sent by the phone, supporting sequence diagrams, latency tracking, and status tracing. Right-click to extract standard cURL commands—a perfect substitute for the Charles proxy experience.
-![Traffic Capture](小猫Mock截图/小猫mock-logs.png)
+### Step 03: Real-Device Packet Capture & One-Click cURL
+Real-time filtering/monitoring of all phone requests, with sequence diagrams, latency tracking, and status tracing. Right-click to extract standard cURL commands — a perfect Charles substitute.
 
 ### Step 04: Visual Rule Library & JSON Tree Editor
-Supports category grouping and card-based archiving for Mock rules. Features a JSON tree editor to prevent syntax errors and supports one-click, high-fidelity autofill tuning of historical Mock payloads.
-![Rule Management](小猫Mock截图/小猫mock-规则库.png)
+Category grouping and card-based archiving for mock rules. JSON tree editor prevents syntax errors; one-click autofill tunes historical mock payloads.
 
 ### Step 05: AI-Driven Dynamic Mock
-Enable AI dynamic responses; the system adaptively matches the API path, using DeepSeek / Claude to stream contextually appropriate business data. It can also inject missing/overflow values to perform crash chaos tests.
-![AI Dynamic Mock](小猫Mock截图/小猫mock-aigc-生成完成.png)
+Enable AI dynamic responses; the system matches the API path and streams contextually appropriate business data via DeepSeek / Claude, and can inject missing/overflow values for crash chaos tests.
 
 ### Step 06: Rapid Multi-Platform SDK Integration
-The console includes built-in standard integration guides. Local URL redirection on the client only occurs when Mocking is enabled and a scanned connection exists, leaving the production environment unaffected and originally intended business logic completely unpolluted.
-![SDK Integration Guide](小猫Mock截图/小猫mock-接入教程和常见问题.png)
+Built-in integration guides. Client URL rewriting only happens when mocking is enabled **and** a scanned connection exists — production logic stays untouched.
 
 ## 6. 🚀 Run & Startup Guide
 
 ### Method A: Run the Pre-packaged Standalone App (Recommended 👍)
-* **🖥️ macOS**: Run `dist/小猫Mock` directly or double-click `start.command` in the project root.
-* **💻 Windows**: Run `dist/小猫Mock.exe` directly or double-click `start.bat` in the project root.
+* **🖥️ macOS**: Double-click `start.command` in the project root (it bootstraps the venv, installs deps, and launches). The bundled `.app` can also be opened directly.
+* **💻 Windows**: Run the packaged executable (see Build section) or `package_win.bat`.
 
-After starting, the system will automatically open your default browser to the Web main panel: `http://127.0.0.1:8099`.
+After starting, the default browser opens the Web panel automatically: `http://127.0.0.1:8099`.
 
-### Method B: Start from Source & Virtual Environment (Developer Mode)
-1. **Install dependencies**:
+### Method B: Start from Source (Developer Mode)
+1. **Create & activate a virtual environment, install dependencies**:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install fastapi uvicorn pydantic httpx lz4
+   pip install fastapi uvicorn pydantic httpx lz4 curl_cffi
    ```
-2. **Start the service**:
-   * macOS: `bash build.sh`
-   * Windows: `package.bat`
+2. **Launch the service** (macOS):
+   ```bash
+   bash build.sh
+   ```
+   This activates the venv, auto-installs any missing deps, opens the browser, and runs `server.py` on port `8099`.
+
+## 6.5 🌐 Cross-Network Connectivity (Ngrok)
+
+When the phone and Mac are on **different networks** (4G/5G, cross-segment, or unable to join the same Wi-Fi), LAN direct connection fails. The "Cross-Network Connectivity (Ngrok)" mode opens a secure public tunnel so the phone can reach your local mock server from anywhere.
+
+### Install Ngrok (macOS, via Homebrew)
+```bash
+brew install ngrok/ngrok/ngrok
+```
+
+### Configure the Authtoken (free, required for stable tunnels)
+Sign up at [ngrok.com](https://ngrok.com), copy your authtoken, then:
+```bash
+ngrok config add-authtoken <YOUR_AUTHTOKEN>
+```
+> Without an authtoken the tunnel still works but is subject to Ngrok's free-tier session/time limits.
+
+### How the secure tunnel works
+1. Each time you enable the mode, the server **generates a random 16-character password** and starts Ngrok with `--basic-auth mockuser:<random-password>`. Unauthenticated requests are rejected with `401`.
+2. The public URL **plus the random credentials** are encoded into the **QR code on the Web panel**. Scanning it with your phone connects directly — **the password never goes through chat tools, email, or a shared link**.
+3. Because each developer runs their own Mac and the QR is scanned locally (Mac ↔ your own phone), the random password **never leaves your device ecosystem**, making leakage practically impossible in this local closed-loop usage.
+
+### Security notes
+* **LAN vs Ngrok**: Switching between "LAN Direct" and "Ngrok" only opens/tears down the public tunnel — the local mock service keeps running.
+* Traffic is relayed through Ngrok's servers (TLS terminates at Ngrok), so **do not transmit core confidential data** over this channel.
+* The free-tier subdomain auto-reuses and may be reclaimed or conflict with others — **do not treat it as a permanent address**; a new random password is generated on every launch.
+* This is a **temporary, non-sensitive cross-network debugging** solution, **not production-grade**.
+* Follow "open when needed, close when done": switch back to "LAN Direct" after debugging to tear down the public tunnel.
 
 ## 7. 📦 Build & Package
-If you modify the underlying engine logic or frontend interface, you can use the built-in scripts to repackage a clean executable:
-* **macOS**: Run `sh package_mac.sh` to output `dist/小猫Mock.app`
-* **Windows**: Run `package_win.bat` to output `dist/小猫Mock.exe`
+
+If you modify the engine or frontend, use the built-in scripts to repackage a clean executable:
+
+* **macOS** (outputs `dist/小猫Mock.app`):
+  ```bash
+  bash package_mac.sh
+  ```
+* **Windows** (outputs a standalone `.exe`):
+  ```bat
+  package_win.bat
+  ```
+* Packaging logic lives in `package.py` (PyInstaller-based, one-file bundle with `templates` embedded).
 
 ## 8. 🛠️ FAQ & Troubleshooting
 
-If your App fails to connect to the "Little Cat Mock" server (requests stuck loading or timing out) after establishing a direct LAN connection, please verify the following:
+If the App fails to connect after a LAN connection (requests stuck loading / timing out):
 
-1. **Firewall Blocks**:
-   * **macOS**: Check "System Preferences" -> "Firewall", ensuring incoming connections are allowed for `Python` or `小猫Mock`.
-   * **Windows**: When the security alert pops up on the first launch, ensure both "Private networks" and "Public networks" are checked to allow access.
-2. **AP Isolation / Guest Network Restrictions**:
-   Some corporate or cafe Wi-Fi networks have AP isolation enabled, preventing devices on the LAN from communicating with each other. **Solution**: Turn on your phone's personal hotspot and connect your computer to it, creating a clean, isolated mini-LAN.
-3. **VPN / Proxy Software Conflicts**:
-   Ensure that no global proxies like Clash or Surge are running on either the phone or computer. These applications hijack routing rules, preventing `192.168.x.x:8099` from connecting correctly.
+1. **Firewall Blocks**
+   * **macOS**: System Settings → Firewall — allow incoming connections for `Python` / the app.
+   * **Windows**: On first-launch security alert, check both "Private" and "Public" networks.
+2. **AP Isolation / Guest Network**
+   Some corporate/cafe Wi-Fi enable AP isolation, blocking LAN device-to-device traffic. **Fix**: turn on your phone's personal hotspot and connect the computer to it, forming a clean mini-LAN.
+3. **VPN / Proxy Software Conflicts**
+   Ensure no global proxy (Clash, Surge) runs on phone or computer — they hijack routing and break `192.168.x.x:8099`.
+4. **Ngrok tunnel stuck on "initializing"**
+   Ensure `ngrok` is installed and an authtoken is configured. If a previous `ngrok` process is stuck, the launcher auto-cleans it on next start. Check the Web panel's tunnel error text for `ERR_NGROK_*` details.
 
 ---
-💡 **Happy debugging! If you have any suggestions, feel free to share your feedback!** 🐱
+
+💡 **Happy debugging! Feel free to share feedback.** 🐱
