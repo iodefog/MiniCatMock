@@ -2226,6 +2226,8 @@ async def _proxy_to_url(real_url, method, request, body_bytes, log_entry, reques
     log_entry["proxy_real_url"] = real_url
 
     proxy_headers = {}
+    # 仅排除"逐跳(hop-by-hop)"与"由代理重新计算"的头，保证 App 原始请求头尽可能一致地透传到真实目标。
+    # 注意：x-encrypt-type 等应用层业务头必须保留，否则目标收不到加密标识，破坏一致性。
     excluded_headers = {
         "host",
         "x-original-url",
@@ -2233,12 +2235,18 @@ async def _proxy_to_url(real_url, method, request, body_bytes, log_entry, reques
         "content-length",
         "x-forwarded-proto", "x-forwarded-for", "x-forwarded-port",
         "x-forwarded-host", "x-real-ip", "x-scheme",
-        "connection", "keep-alive",
-        "x-encrypt-type",
+        "connection", "keep-alive", "proxy-connection", "proxy-authorization",
     }
     for k, v in request.headers.items():
         if k.lower() not in excluded_headers:
             proxy_headers[k] = v
+
+    # 强制按 App 原始请求保留 content-type / content-encoding，
+    # 避免底层 HTTP 库（curl_cffi/httpx）在 data= 模式下自动填充或改写这些应用层头。
+    for preserve in ("content-type", "content-encoding"):
+        orig = request.headers.get(preserve)
+        if orig:
+            proxy_headers[preserve] = orig
 
     forwarded_keys = list(proxy_headers.keys())
     print(f"   📋 [Proxy Headers] 共 {len(forwarded_keys)} 个头: {', '.join(forwarded_keys[:15])}{'...' if len(forwarded_keys) > 15 else ''}")

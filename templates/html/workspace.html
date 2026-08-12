@@ -732,52 +732,13 @@
                             </div>
                         </div>
 
-                        <!-- ─── 区块 2.5: HTTP/3 域名反向代理 ─── -->
-                        <div class="settings-card">
-                            <div class="settings-card-header">
-                                <div class="settings-card-icon" style="background: rgba(56,189,248,0.1); color: #38bdf8;">🚀</div>
-                                <div class="settings-card-title-group">
-                                    <h3 class="settings-card-title">HTTP/3 域名代理 (Caddy)</h3>
-                                    <p class="settings-card-desc">用自定义域名暴露服务，原生支持 HTTP/3(QUIC)，抓包列表正确显示协议版本</p>
-                                </div>
-                            </div>
-                            <div class="settings-card-body" style="display: flex; flex-direction: column; gap: 14px;">
-                                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
-                                    将域名（如 <code>yfbapih3.dramaboxapp.com</code>）的 DNS <b>A 记录</b>指向本机公网 IP，并确保防火墙放行
-                                    <b>80 / 443</b> 端口（含 UDP 443）。Caddy 会自动申请并续期 HTTPS 证书。
-                                </div>
-                                <div id="h3-suggest-banner" class="settings-warning-card" style="display:none; border-left-color: var(--purple); background: rgba(139,92,246,0.04);">
-                                    <span class="settings-warning-icon">💡</span>
-                                    <div class="settings-warning-body">
-                                        检测到客户端正在请求域名 <strong class="h3-suggest-domain">—</strong>，
-                                        点击「启用代理」即可用该域名暴露服务并支持 HTTP/3。
-                                    </div>
-                                </div>
-                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                                    <input type="text" id="h3-domain-input" placeholder="输入自定义域名，例如 yfbapih3.dramaboxapp.com"
-                                        style="flex: 1; min-width: 220px; padding: 9px 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: monospace; font-size: 12px; outline: none;">
-                                    <button class="btn-purple" id="btn-h3-enable" onclick="startH3Proxy()">🚀 启用代理</button>
-                                    <button class="btn-settings-action" id="btn-h3-disable" onclick="stopH3Proxy()" style="display:none;">⏹ 停用</button>
-                                </div>
-                                <div id="h3-status-badge" class="tunnel-status-badge-inline" style="display:none;">⏳ 正在初始化...</div>
-                                <span id="h3-url-copy-btn" style="display:none; font-size: 12px; color: var(--purple); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="copyH3Url()">📋 复制访问地址</span>
-                                <div id="h3-binary-warning" class="settings-warning-card" style="display:none; border-left-color: var(--orange); background: rgba(245,158,11,0.04);">
-                                    <span class="settings-warning-icon">⚠️</span>
-                                    <div class="settings-warning-body">
-                                        <strong>未检测到内置 Caddy 二进制</strong>
-                                        <p style="margin: 6px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6;">请先运行 <code>python3 download_caddy.py</code> 下载 Caddy，或重新打包应用。</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- ─── 区块 3: 路径映射转发 (可折叠) ─── -->
                         <details class="settings-card settings-collapsible" id="pm-collapsible" open>
                             <summary class="settings-card-header settings-summary-header">
                                 <div class="settings-card-icon" style="background: rgba(245,158,11,0.1); color: var(--orange);">🗺️</div>
                                 <div class="settings-card-title-group">
-                                    <h3 class="settings-card-title">路径映射转发 (Path Mapping)</h3>
-                                    <p class="settings-card-desc">将 /mock/{path} 请求自动转发到真实目标地址</p>
+                                    <h3 class="settings-card-title">Url重定向 (Path Mapping)</h3>
+                                    <p class="settings-card-desc">将 /mock/{path} 请求自动重定向到真实目标地址</p>
                                 </div>
                                 <span class="settings-collapse-arrow">▾</span>
                             </summary>
