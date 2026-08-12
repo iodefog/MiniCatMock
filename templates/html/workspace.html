@@ -26,9 +26,10 @@
 
                 <div class="search-filter-container">
                     <div class="search-input-wrapper">
-                        <span class="search-icon-inside" id="log-ai-search-toggle" onclick="toggleAISearch()" title="切换 AI 语义搜索" style="color: var(--purple); cursor: pointer; border: 1px solid transparent; border-radius: 6px; padding: 2px 5px;">✧</span>
-                        <input type="text" id="log-search-input" data-i18n-placeholder="search_placeholder" placeholder="AI 自然语言搜索 / 搜索路径..."
-                            oninput="filterLogs()">
+                        <span class="search-icon-inside ai-search-toggle" id="log-ai-search-toggle" onclick="toggleAISearch()" title="点击开启 AI 语义搜索（再次点击关闭）">✧ AI</span>
+                        <input type="text" id="log-search-input" data-i18n-placeholder="search_placeholder" placeholder="AI 自然语言搜索 / 搜索路径（多路径用空格、或 \ 分隔）..."
+                            oninput="filterLogs()" onfocus="startPlaceholderScroll()" onblur="stopPlaceholderScroll()">
+                        <span class="search-ph-placeholder" id="log-search-ph"><span class="ph-inner">AI 自然语言搜索 / 搜索路径（多路径用空格 或、或\ 分隔）</span></span>
                     </div>
                     <div class="filter-btn-group">
                         <button class="filter-btn active" onclick="setLogFilter('all', this)" data-i18n="filter_all">全部</button>

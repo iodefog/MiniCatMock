@@ -22,9 +22,10 @@
 
                 <div class="search-filter-container">
                     <div class="search-input-wrapper">
-                        <span class="search-icon-inside" id="log-ai-search-toggle" onclick="toggleAISearch()" title="Toggle AI semantic search" style="color: var(--purple); cursor: pointer; border: 1px solid transparent; border-radius: 6px; padding: 2px 5px;">✧</span>
-                        <input type="text" id="log-search-input" placeholder="AI natural language search..."
-                            oninput="filterLogs()">
+                        <span class="search-icon-inside ai-search-toggle" id="log-ai-search-toggle" onclick="toggleAISearch()" title="Click to enable AI semantic search (click again to disable)">✧ AI</span>
+                        <input type="text" id="log-search-input" placeholder="AI natural language search (separate multiple paths with space, 、 or \ )..."
+                            oninput="filterLogs()" onfocus="startPlaceholderScroll()" onblur="stopPlaceholderScroll()">
+                        <span class="search-ph-placeholder" id="log-search-ph"><span class="ph-inner">AI natural language search (separate multiple paths with space, 、 or \ )...</span></span>
                     </div>
                     <div class="filter-btn-group">
                         <button class="filter-btn active" onclick="setLogFilter('all', this)">ALL</button>

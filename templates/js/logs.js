@@ -696,6 +696,7 @@ function setLogFilter(filterType, element) {
 function filterLogs() {
     const input = document.getElementById('log-search-input');
     const q = input ? input.value.trim() : '';
+    updateSearchPlaceholderUI();
     if (window.aiSearchMode) {
         if (!q) { window.aiSearchCondition = null; renderFilteredLogs(); return; }
         // AI 语义搜索模式：防抖触发意图解析，期间先用已有条件即时渲染
@@ -707,28 +708,54 @@ function filterLogs() {
     renderFilteredLogs();
 }
 
+// ─── 占位提示滚动层：原生 placeholder 不支持横向滚动，用覆盖层 marquee 显示完整提示 ───
+function updateSearchPlaceholderUI() {
+    const input = document.getElementById('log-search-input');
+    const ph = document.getElementById('log-search-ph');
+    if (!input || !ph) return;
+    // 有内容或聚焦时隐藏覆盖层（聚焦时用户直接看到输入框，不需要滚动提示）
+    const show = !input.value && document.activeElement !== input;
+    ph.style.display = show ? '' : 'none';
+    input.classList.toggle('hide-native-ph', show);
+}
+
+function startPlaceholderScroll() {
+    // 聚焦时隐藏滚动占位层
+    const ph = document.getElementById('log-search-ph');
+    const input = document.getElementById('log-search-input');
+    if (ph) ph.style.display = 'none';
+    if (input) input.classList.add('hide-native-ph');
+}
+
+function stopPlaceholderScroll() {
+    updateSearchPlaceholderUI();
+}
+
+function syncSearchPlaceholderText() {
+    const input = document.getElementById('log-search-input');
+    const ph = document.getElementById('log-search-ph');
+    if (input && ph) {
+        ph.querySelector('.ph-inner').textContent = input.placeholder;
+    }
+    updateSearchPlaceholderUI();
+}
+
 // ─── AI 语义搜索：切换模式 ───
 function toggleAISearch() {
     window.aiSearchMode = !window.aiSearchMode;
     const icon = document.getElementById('log-ai-search-toggle');
     const input = document.getElementById('log-search-input');
     if (icon) {
-        if (window.aiSearchMode) {
-            icon.style.background = 'var(--purple)';
-            icon.style.color = '#fff';
-            icon.style.borderColor = 'var(--purple)';
-            icon.title = 'AI 语义搜索：开（点击关闭）';
-        } else {
-            icon.style.background = 'transparent';
-            icon.style.color = 'var(--purple)';
-            icon.style.borderColor = 'transparent';
-            icon.title = '切换 AI 语义搜索';
-        }
+        icon.classList.toggle('active', window.aiSearchMode);
+        icon.title = window.aiSearchMode ? 'AI 语义搜索：开（点击关闭）' : '点击开启 AI 语义搜索（再次点击关闭）';
     }
     if (input) {
         input.placeholder = window.aiSearchMode
-            ? (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI search: e.g. "all requests of sf001/list"' : 'AI 语义搜索：如"提取所有 sf001/list 的请求"')
-            : (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI natural language search...' : 'AI 自然语言搜索 / 搜索路径...');
+            ? (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI search: e.g. "all requests of sf001/list and sf002/detail"' : 'AI 语义搜索：如"提取 sf001/list 和 sf002/detail 的请求"')
+            : (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'AI natural language search (separate multiple paths with space, 、 or \\)' : 'AI 自然语言搜索 / 搜索路径（多路径用空格、或 \\ 分隔）...');
+        syncSearchPlaceholderText();
+    } else {
+        updateSearchPlaceholderUI();
     }
     if (!window.aiSearchMode) window.aiSearchCondition = null;
     if (window.aiSearchMode && input && input.value.trim()) {
@@ -748,13 +775,14 @@ async function runAISemanticSearch(query) {
     try {
         const systemPrompt = `你是一个日志搜索条件解析器。根据用户的中文/英文自然语言，提取过滤条件并以纯 JSON 返回，不要任何解释或 Markdown。
 字段定义：
-- pathContains: 字符串，若用户提到某个接口路径(如 sf001/list)，取其路径片段(不含域名、不含查询参数)
+- pathContains: 字符串或字符串数组，若用户提到某个接口路径(如 sf001/list)，取其路径片段(不含域名、不含查询参数)；若用户提到多个路径(用空格/、/或"和""与""以及"连接)，返回数组，如 ["sf001/list","sf002/detail"]
 - method: 字符串，HTTP 方法 GET/POST/PUT/DELETE 之一，若提及
 - statusMin: 数字，若提及"错误/失败/异常/出错"则给 400，否则省略
 - onlyMock: 布尔，若提及"mock/模拟/命中"则为 true
 - onlyPass: 布尔，若提及"透传/未命中/代理"则为 true
 - keywords: 字符串数组，其他需要全文匹配的关键词
 示例："提取所有 sf001/list 的请求" => {"pathContains":"sf001/list"}
+示例："提取 sf001/list 和 sf002/detail 的请求" => {"pathContains":["sf001/list","sf002/detail"]}
 只返回 JSON。`;
         const text = await callAIComplete(cfg, systemPrompt, query);
         let cond = null;
@@ -783,6 +811,7 @@ function renderFilteredLogs() {
     const container = document.getElementById('log-list');
     const badge = document.getElementById('log-badge');
     if (!container) return;
+    updateSearchPlaceholderUI();
     initLogLongPress(); // 绑定一次长按/右键浮层（幂等）
 
     const searchQuery = (document.getElementById('log-search-input')?.value || '').toLowerCase().trim();
@@ -821,7 +850,11 @@ function renderFilteredLogs() {
         // 2a. AI 语义搜索条件（结构化过滤，优先于普通子串匹配）
         if (aiActive) {
             const c = window.aiSearchCondition;
-            if (c.pathContains && !(log.path || '').toLowerCase().includes(String(c.pathContains).toLowerCase())) return false;
+            if (c.pathContains) {
+                const pcList = Array.isArray(c.pathContains) ? c.pathContains : [c.pathContains];
+                const lp = (log.path || '').toLowerCase();
+                if (!pcList.some(p => lp.includes(String(p).toLowerCase()))) return false;
+            }
             if (c.method && (log.method || '').toUpperCase() !== String(c.method).toUpperCase()) return false;
             if (c.statusMin && !(log.status >= c.statusMin)) return false;
             if (c.onlyMock && !log.mock_matched) return false;
@@ -835,17 +868,25 @@ function renderFilteredLogs() {
 
         // 2b. 普通子串检索 (支持过滤 Path, Method, Query参数, RequestBody, Headers)
         if (searchQuery && !window.aiSearchMode) {
-            const pathMatch = (log.path || '').toLowerCase().includes(searchQuery);
-            const methodMatch = (log.method || '').toLowerCase().includes(searchQuery);
+            // 支持多 path 检索：多个关键词以 空格 / 、 / \ 分隔，任一命中即匹配（并集）
+            const terms = searchQuery.split(/[\s、\\]+/).map(t => t.trim()).filter(Boolean);
 
-            // 安全序列化匹配
-            const queryMatch = JSON.stringify(log.query_params || {}).toLowerCase().includes(searchQuery);
-            const bodyMatch = typeof log.body === 'string'
-                ? log.body.toLowerCase().includes(searchQuery)
-                : JSON.stringify(log.body || {}).toLowerCase().includes(searchQuery);
-            const headersMatch = JSON.stringify(log.headers || {}).toLowerCase().includes(searchQuery);
+            const matchTerm = (term) => {
+                const pathMatch = (log.path || '').toLowerCase().includes(term);
+                const methodMatch = (log.method || '').toLowerCase().includes(term);
 
-            return pathMatch || methodMatch || queryMatch || bodyMatch || headersMatch;
+                // 安全序列化匹配
+                const queryMatch = JSON.stringify(log.query_params || {}).toLowerCase().includes(term);
+                const bodyMatch = typeof log.body === 'string'
+                    ? log.body.toLowerCase().includes(term)
+                    : JSON.stringify(log.body || {}).toLowerCase().includes(term);
+                const headersMatch = JSON.stringify(log.headers || {}).toLowerCase().includes(term);
+
+                return pathMatch || methodMatch || queryMatch || bodyMatch || headersMatch;
+            };
+
+            // 任意一个关键词命中即保留（空输入时 terms 为空，前面已 return true 不会到这里）
+            return terms.some(matchTerm);
         }
 
         return true;
